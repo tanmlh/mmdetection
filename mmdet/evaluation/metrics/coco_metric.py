@@ -5,6 +5,9 @@ import os.path as osp
 import tempfile
 from collections import OrderedDict
 from typing import Dict, List, Optional, Sequence, Union
+import pdb
+import pycocotools.mask as mask_util
+import shapely
 
 import numpy as np
 import torch
@@ -13,9 +16,10 @@ from mmengine.fileio import dump, get_local_path, load
 from mmengine.logging import MMLogger
 from terminaltables import AsciiTable
 
-from mmdet.datasets.api_wrappers import COCO, COCOeval, COCOevalMP
+from mmdet.datasets.api_wrappers import COCO, COCOeval, COCOevalMP, COCOevalBuilding
 from mmdet.registry import METRICS
 from mmdet.structures.mask import encode_mask_results
+import mmdet.utils.tanmlh_polygon_utils as polygon_utils
 from ..functional import eval_recalls
 
 
@@ -81,7 +85,12 @@ class CocoMetric(BaseMetric):
                  collect_device: str = 'cpu',
                  prefix: Optional[str] = None,
                  sort_categories: bool = False,
-                 use_mp_eval: bool = False) -> None:
+                 use_mp_eval: bool = False,
+                 use_building_eval: bool=True,
+                 mask_type: str='binary',
+                 calculate_mta: bool=False,
+                 calculate_iou_ciou: bool=False,
+                 score_thre: float=0.5) -> None:
         super().__init__(collect_device=collect_device, prefix=prefix)
         # coco evaluation metrics
         self.metrics = metric if isinstance(metric, list) else [metric]
@@ -96,6 +105,8 @@ class CocoMetric(BaseMetric):
         self.classwise = classwise
         # whether to use multi processing evaluation, default False
         self.use_mp_eval = use_mp_eval
+        self.use_building_eval = use_building_eval
+        self.mask_type = mask_type
 
         # proposal_nums used to compute recall or precision.
         self.proposal_nums = list(proposal_nums)
@@ -113,6 +124,9 @@ class CocoMetric(BaseMetric):
             'be saved to a temp directory which will be cleaned up at the end.'
 
         self.outfile_prefix = outfile_prefix
+        self.calculate_mta = calculate_mta
+        self.calculate_iou_ciou = calculate_iou_ciou
+        self.score_thre = score_thre
 
         self.backend_args = backend_args
         if file_client_args is not None:
@@ -122,6 +136,7 @@ class CocoMetric(BaseMetric):
                 'https://github.com/open-mmlab/mmdetection/blob/main/configs/_base_/datasets/coco_detection.py'  # noqa: E501
             )
 
+        self.ann_file = ann_file
         # if ann_file is not specified,
         # initialize coco api with the converted dataset
         if ann_file is not None:
@@ -258,6 +273,8 @@ class CocoMetric(BaseMetric):
                 if isinstance(masks[i]['counts'], bytes):
                     masks[i]['counts'] = masks[i]['counts'].decode()
                 data['segmentation'] = masks[i]
+                if 'polygons' in result:
+                    data['polygon'] = result['polygons'][i]
                 segm_json_results.append(data)
 
         result_files = dict()
@@ -360,14 +377,52 @@ class CocoMetric(BaseMetric):
             result['bboxes'] = pred['bboxes'].cpu().numpy()
             result['scores'] = pred['scores'].cpu().numpy()
             result['labels'] = pred['labels'].cpu().numpy()
+            # result['labels'] = np.zeros(len(pred['labels']))
+
             # encode mask to RLE
             if 'masks' in pred:
                 result['masks'] = encode_mask_results(
                     pred['masks'].detach().cpu().numpy()) if isinstance(
                         pred['masks'], torch.Tensor) else pred['masks']
+
+            # use polygon predictions first
+            if 'segmentations' in pred and self.mask_type=='polygon':
+                H, W = pred['masks'].shape[1:]
+                rles = []
+
+                # dt_polygons = []
+                for polygon in pred['segmentations']:
+                    rle = mask_util.frPyObjects(polygon, H, W)
+                    rle = mask_util.merge(rle)
+                    rles.append(rle)
+
+                    """
+                    exterior = np.array(polygon[0]).reshape(-1,2).tolist()
+                    interiors = [np.array(x).reshape(-1,2).tolist() for x in polygon[1:]]
+                    dt_polygon = shapely.geometry.Polygon(shell=exterior, holes=interiors)
+                    if dt_polygon.is_valid:
+                        dt_polygons.append(dt_polygon)
+                    """
+
+                """
+                gt_jsons = data_sample['gt_instances']['masks'].to_json()
+                gt_polygons = [shapely.geometry.shape(x) for x in gt_jsons]
+                gt_polygons = [x for x in gt_polygons if x.is_valid]
+                fixed_gt_polygons = polygon_utils.fix_polygons(gt_polygons, buffer=0.0)
+                fixed_dt_polygons = polygon_utils.fix_polygons(dt_polygons, buffer=0.0)
+                """
+
+                # mtas = polygon_utils.compute_polygon_contour_measures(fixed_dt_polygons, fixed_gt_polygons, sampling_spacing=2.0, min_precision=0.5, max_stretch=2)
+
+                # binary_mask = mask_util.decode(rles[6])
+                result['masks'] = rles
+                result['polygons'] = pred['segmentations']
+                # result['mtas'] = mtas
+
             # some detectors use different scores for bbox and mask
             if 'mask_scores' in pred:
                 result['mask_scores'] = pred['mask_scores'].cpu().numpy()
+
 
             # parse gt
             gt = dict()
@@ -397,6 +452,19 @@ class CocoMetric(BaseMetric):
 
         # split gt and prediction list
         gts, preds = zip(*results)
+
+        if 'mtas' in preds[0]:
+            mtas = []
+            for pred in preds:
+                mtas.extend(pred['mtas'])
+
+            mtas = [x for x in mtas if x is not None]
+            mean_mta = 0
+            if len(mtas) > 0:
+                mean_mta = np.array(mtas).mean()
+
+            logger.info(f'MTA: {mean_mta}')
+
 
         tmp_dir = None
         if self.outfile_prefix is None:
@@ -466,15 +534,20 @@ class CocoMetric(BaseMetric):
                     'The testing results of the whole dataset is empty.')
                 break
 
-            if self.use_mp_eval:
+
+            if self.use_building_eval:
+                coco_eval = COCOevalBuilding(self._coco_api, coco_dt, iou_type)
+            elif self.use_mp_eval:
                 coco_eval = COCOevalMP(self._coco_api, coco_dt, iou_type)
             else:
                 coco_eval = COCOeval(self._coco_api, coco_dt, iou_type)
+
 
             coco_eval.params.catIds = self.cat_ids
             coco_eval.params.imgIds = self.img_ids
             coco_eval.params.maxDets = list(self.proposal_nums)
             coco_eval.params.iouThrs = self.iou_thrs
+
 
             # mapping of cocoEval.stats
             coco_metric_names = {
@@ -592,6 +665,24 @@ class CocoMetric(BaseMetric):
                             f'{ap[1]:.3f} {ap[2]:.3f} {ap[3]:.3f} '
                             f'{ap[4]:.3f} {ap[5]:.3f}')
 
+            if self.calculate_mta:
+                mtas = polygon_utils.compute_mta(coco_eval)
+                mtas = [x for x in mtas if x is not None]
+                mta = np.array(mtas).mean()
+                eval_results['mta'] = mta
+                logger.info(f'mta: {mta}')
+
+            if self.calculate_iou_ciou:
+                ious, c_ious, N_pairs = polygon_utils.compute_IoU_cIoU(
+                    coco_eval.cocoDt, coco_eval.cocoGt, score_thre=self.score_thre
+                )
+                eval_results['iou'] = np.array(ious).mean()
+                eval_results['c_iou'] = np.array(c_ious).mean()
+                eval_results['N_ratio'] = N_pairs[0] / N_pairs[1]
+                logger.info(f'iou: {eval_results["iou"]}, c_iou: {eval_results["c_iou"]}, N_ratio: {N_pairs[0] / N_pairs[1]}')
+
+
         if tmp_dir is not None:
             tmp_dir.cleanup()
+
         return eval_results

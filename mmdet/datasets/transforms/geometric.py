@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 
 from typing import Optional, Union
+import pdb
 
 import cv2
 import mmcv
@@ -517,9 +518,13 @@ class Rotate(GeomTransform):
 
     def _transform_masks(self, results: dict, mag: float) -> None:
         """Rotate the masks."""
+
+        img_shape = results['img_shape']
+        center = ((img_shape[1] - 1) * 0.5, (img_shape[0] - 1) * 0.5)
         results['gt_masks'] = results['gt_masks'].rotate(
             results['img_shape'],
             mag,
+            center=center,
             border_value=self.mask_border_value,
             interpolation=self.interpolation)
 
@@ -530,6 +535,16 @@ class Rotate(GeomTransform):
             mag,
             border_value=self.seg_ignore_label,
             interpolation='nearest')
+
+@TRANSFORMS.register_module()
+class Rotate90(Rotate):
+    def __init__(self, prob=0.75, **kwargs):
+        super().__init__(prob=prob, **kwargs)
+
+    @cache_randomness
+    def _get_mag(self):
+        mag = np.random.choice([90, 180, 270])
+        return mag
 
 
 @TRANSFORMS.register_module()

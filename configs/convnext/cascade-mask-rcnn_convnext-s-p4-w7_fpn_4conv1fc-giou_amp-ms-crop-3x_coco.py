@@ -17,7 +17,9 @@ model = dict(
         gap_before_final_norm=False,
         init_cfg=dict(
             type='Pretrained', checkpoint=checkpoint_file,
-            prefix='backbone.')))
+            prefix='backbone.')
+    )
+)
 
 optim_wrapper = dict(paramwise_cfg={
     'decay_rate': 0.7,

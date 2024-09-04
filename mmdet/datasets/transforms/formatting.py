@@ -1,5 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import Optional, Sequence
+import pdb
 
 import numpy as np
 from mmcv.transforms import to_tensor
@@ -44,7 +45,8 @@ class PackDetInputs(BaseTransform):
     mapping_table = {
         'gt_bboxes': 'bboxes',
         'gt_bboxes_labels': 'labels',
-        'gt_masks': 'masks'
+        'gt_masks': 'masks',
+        'gt_poly_jsons': 'poly_jsons'
     }
 
     def __init__(self,
@@ -104,15 +106,21 @@ class PackDetInputs(BaseTransform):
                         self.mapping_table[key]] = results[key][ignore_idx]
                 else:
                     instance_data[self.mapping_table[key]] = results[key]
-            else:
+            elif key.startswith('gt_bboxes'):
                 if 'gt_ignore_flags' in results:
                     instance_data[self.mapping_table[key]] = to_tensor(
                         results[key][valid_idx])
                     ignore_instance_data[self.mapping_table[key]] = to_tensor(
                         results[key][ignore_idx])
                 else:
-                    instance_data[self.mapping_table[key]] = to_tensor(
-                        results[key])
+                    instance_data[self.mapping_table[key]] = to_tensor(results[key])
+            elif key == 'gt_poly_jsons':
+                if 'gt_ignore_flags' in results:
+                    instance_data[self.mapping_table[key]] = [results[key][x] for x in valid_idx]
+                    ignore_instance_data[self.mapping_table[key]] = [results[key][x] for x in ignore_idx]
+                else:
+                    instance_data[self.mapping_table[key]] = results[key]
+
         data_sample.gt_instances = instance_data
         data_sample.ignored_instances = ignore_instance_data
 

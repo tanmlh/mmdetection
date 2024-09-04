@@ -21,7 +21,8 @@ model = dict(
         gap_before_final_norm=False,
         init_cfg=dict(
             type='Pretrained', checkpoint=checkpoint_file,
-            prefix='backbone.')),
+            prefix='backbone.')
+    ),
     neck=dict(in_channels=[96, 192, 384, 768]),
     roi_head=dict(bbox_head=[
         dict(

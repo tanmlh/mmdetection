@@ -18,6 +18,10 @@ from .grounding_dino_layers import (GroundingDinoTransformerDecoder,
 from .mask2former_layers import (Mask2FormerTransformerDecoder,
                                  Mask2FormerTransformerDecoderLayer,
                                  Mask2FormerTransformerEncoder)
+
+from .polyformer_layers import (PolyFormerTransformerDecoderLayer,
+                                PolyFormerTransformerDecoder,
+                                PolyFormerTransformerEncoder)
 from .utils import (MLP, AdaptivePadding, ConditionalAttention, DynamicConv,
                     PatchEmbed, PatchMerging, coordinate_to_encoding,
                     inverse_sigmoid, nchw_to_nlc, nlc_to_nchw)
@@ -37,5 +41,6 @@ __all__ = [
     'CdnQueryGenerator', 'Mask2FormerTransformerEncoder',
     'Mask2FormerTransformerDecoderLayer', 'Mask2FormerTransformerDecoder',
     'GroundingDinoTransformerDecoderLayer', 'GroundingDinoTransformerEncoder',
-    'GroundingDinoTransformerDecoder'
+    'GroundingDinoTransformerDecoder', 'PolyFormerTransformerDecoder',
+    'PolyFormerTransformerDecoderLayer'
 ]

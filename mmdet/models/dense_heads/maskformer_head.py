@@ -8,6 +8,7 @@ from mmcv.cnn import Conv2d
 from mmengine.model import caffe2_xavier_init
 from mmengine.structures import InstanceData, PixelData
 from torch import Tensor
+import pdb
 
 from mmdet.models.layers.pixel_decoder import PixelDecoder
 from mmdet.registry import MODELS, TASK_UTILS
@@ -345,6 +346,7 @@ class MaskFormerHead(AnchorFreeHead):
             batch_gt_instances for _ in range(num_dec_layers)
         ]
         img_metas_list = [batch_img_metas for _ in range(num_dec_layers)]
+
         losses_cls, losses_mask, losses_dice = multi_apply(
             self._loss_by_feat_single, all_cls_scores, all_mask_preds,
             batch_gt_instances_list, img_metas_list)

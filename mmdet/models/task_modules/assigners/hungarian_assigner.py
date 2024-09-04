@@ -1,5 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import List, Optional, Union
+import pdb
 
 import torch
 from mmengine import ConfigDict
@@ -120,6 +121,7 @@ class HungarianAssigner(BaseAssigner):
                 gt_instances=gt_instances,
                 img_meta=img_meta)
             cost_list.append(cost)
+
         cost = torch.stack(cost_list).sum(dim=0)
 
         # 3. do Hungarian matching on CPU using linear_sum_assignment

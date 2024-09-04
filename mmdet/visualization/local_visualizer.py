@@ -190,10 +190,11 @@ class DetLocalVisualizer(Visualizer):
             for i, mask in enumerate(masks):
                 contours, _ = bitmap_to_polygon(mask)
                 polygons.extend(contours)
+
             self.draw_polygons(polygons, edge_colors='w', alpha=self.alpha)
             self.draw_binary_masks(masks, colors=colors, alphas=self.alpha)
 
-            if len(labels) > 0 and \
+            if len(labels) >= 0 and \
                     ('bboxes' not in instances or
                      instances.bboxes.sum() == 0):
                 # instances.bboxes.sum()==0 represent dummy bboxes.

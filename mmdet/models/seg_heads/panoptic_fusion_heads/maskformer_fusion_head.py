@@ -1,5 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import List
+import pdb
 
 import torch
 import torch.nn.functional as F
@@ -172,6 +173,10 @@ class MaskFormerFusionHead(BasePanopticFusionHead):
                                      mask_pred_binary.flatten(1).sum(1) + 1e-6)
         det_scores = scores_per_image * mask_scores_per_image
         mask_pred_binary = mask_pred_binary.bool()
+
+        # small_mask = mask_pred_binary.sum(dim=[1,2]) < 400
+        # mask_pred_binary[small_mask] = 0
+
         bboxes = mask2bbox(mask_pred_binary)
 
         results = InstanceData()

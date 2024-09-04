@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from abc import abstractmethod
 from typing import Optional, Union
+import pdb
 
 import torch
 import torch.nn.functional as F
@@ -523,3 +524,55 @@ class CrossEntropyLossCost(BaseMatchCost):
             raise NotImplementedError
 
         return cls_cost * self.weight
+
+@TASK_UTILS.register_module()
+class PointL1Cost(BaseMatchCost):
+    """BBoxL1Cost.
+
+    Note: ``bboxes`` in ``InstanceData`` passed in is of format 'xyxy'
+    and its coordinates are unnormalized.
+
+    Args:
+        box_format (str, optional): 'xyxy' for DETR, 'xywh' for Sparse_RCNN.
+            Defaults to 'xyxy'.
+        weight (Union[float, int]): Cost weight. Defaults to 1.
+
+    Examples:
+        >>> from mmdet.models.task_modules.assigners.
+        ... match_costs.match_cost import BBoxL1Cost
+        >>> import torch
+        >>> self = BBoxL1Cost()
+        >>> bbox_pred = torch.rand(1, 4)
+        >>> gt_bboxes= torch.FloatTensor([[0, 0, 2, 4], [1, 2, 3, 4]])
+        >>> factor = torch.tensor([10, 8, 10, 8])
+        >>> self(bbox_pred, gt_bboxes, factor)
+        tensor([[1.6172, 1.6422]])
+    """
+
+    def __init__(self,
+                 weight: Union[float, int] = 1.) -> None:
+        super().__init__(weight=weight)
+
+    def __call__(self,
+                 pred_instances: InstanceData,
+                 gt_instances: InstanceData,
+                 img_meta: Optional[dict] = None,
+                 **kwargs) -> Tensor:
+        """Compute match cost.
+
+        Args:
+            pred_instances (:obj:`InstanceData`): ``bboxes`` inside is
+                predicted boxes with unnormalized coordinate
+                (x, y, x, y).
+            gt_instances (:obj:`InstanceData`): ``bboxes`` inside is gt
+                bboxes with unnormalized coordinate (x, y, x, y).
+            img_meta (Optional[dict]): Image information. Defaults to None.
+
+        Returns:
+            Tensor: Match Cost matrix of shape (num_preds, num_gts).
+        """
+        pred_points = pred_instances.points
+        gt_points = gt_instances.points
+        point_cost = torch.cdist(pred_points, gt_points, p=1)
+        return point_cost
+

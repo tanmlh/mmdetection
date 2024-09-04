@@ -218,6 +218,37 @@ def multi_apply(func, *args, **kwargs):
     map_results = map(pfunc, *args)
     return tuple(map(list, zip(*map_results)))
 
+def multi_apply_v2(func, *args, **kwargs):
+    """Apply function to a list of arguments.
+
+    Note:
+        This function applies the ``func`` to multiple inputs and
+        map the multiple outputs of the ``func`` into different
+        list. Each list contains the same type of outputs corresponding
+        to different inputs.
+
+    Args:
+        func (Function): A function that will be applied to a list of
+            arguments
+
+    Returns:
+        tuple(list): A tuple containing multiple list, each list contains \
+            a kind of returned results by the function
+    """
+    num_iter = len(args[0])
+    results = {}
+    for i in range(num_iter):
+        new_args = [x[i] for x in args]
+        new_kwargs = {key: value[i] for key, value in kwargs.items()}
+        cur_result = func(*new_args, **new_kwargs)
+        for key, value in cur_result.items():
+            if not key in results:
+                results[key] = []
+            results[key].append(value)
+
+    return results
+
+
 
 def unmap(data, count, inds, fill=0):
     """Unmap a subset of item (data) back to the original set of items (of size

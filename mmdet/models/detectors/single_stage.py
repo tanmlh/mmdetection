@@ -111,6 +111,7 @@ class SingleStageDetector(BaseDetector):
             x, batch_data_samples, rescale=rescale)
         batch_data_samples = self.add_pred_to_datasample(
             batch_data_samples, results_list)
+
         return batch_data_samples
 
     def _forward(

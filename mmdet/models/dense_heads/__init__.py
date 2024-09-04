@@ -52,6 +52,27 @@ from .yolact_head import YOLACTHead, YOLACTProtonet
 from .yolo_head import YOLOV3Head
 from .yolof_head import YOLOFHead
 from .yolox_head import YOLOXHead
+from .dp_polygonize_head import DPPolygonizeHead
+from .polygonizer_head_v1 import PolygonizerHeadV1
+from .polygonizer_head_v2 import PolygonizerHeadV2
+from .polygonizer_head_v3 import PolygonizerHeadV3
+from .polygonizer_head_v4 import PolygonizerHeadV4
+from .polygonizer_head_v5 import PolygonizerHeadV5
+from .polygonizer_head_v6 import PolygonizerHeadV6
+from .polygonizer_head_v7 import PolygonizerHeadV7
+from .polygonizer_head_v8 import PolygonizerHeadV8
+from .polygonizer_head_v9 import PolygonizerHeadV9
+from .polygonizer_head_v10 import PolygonizerHeadV10
+from .polygonizer_head_v11 import PolygonizerHeadV11
+from .polygonizer_head_v12 import PolygonizerHeadV12
+from .polygonizer_head_v13 import PolygonizerHeadV13
+from .polygonizer_head_v14 import PolygonizerHeadV14
+from .polygonizer_head_v15 import PolygonizerHeadV15
+from .polygonizer_head_v16 import PolygonizerHeadV16
+from .polygonizer_head_v17 import PolygonizerHeadV17
+from .polygonizer_head_v18 import PolygonizerHeadV18
+from .polygonizer_head_v19 import PolygonizerHeadV19
+from .polygonizer_head_v20 import PolygonizerHeadV20
 
 __all__ = [
     'AnchorFreeHead', 'AnchorHead', 'GuidedAnchorHead', 'FeatureAdaption',
@@ -68,5 +89,11 @@ __all__ = [
     'CenterNetUpdateHead', 'RTMDetHead', 'RTMDetSepBNHead', 'CondInstBboxHead',
     'CondInstMaskHead', 'RTMDetInsHead', 'RTMDetInsSepBNHead',
     'BoxInstBboxHead', 'BoxInstMaskHead', 'ConditionalDETRHead', 'DINOHead',
-    'ATSSVLFusionHead', 'DABDETRHead', 'DDQDETRHead', 'GroundingDINOHead'
+    'ATSSVLFusionHead', 'DABDETRHead', 'DDQDETRHead', 'GroundingDINOHead',
+    'PolygonizerHeadV1', 'DPPolygonizeHead',
+    'PolygonizerHeadV2', 'PolygonizerHeadV3', 'PolygonizerHeadV4', 'PolygonizerHeadV5',
+    'PolygonizerHeadV6', 'PolygonizerHeadV7', 'PolygonizerHeadV8', 'PolygonizerHeadV9',
+    'PolygonizerHeadV10', 'PolygonizerHeadV11', 'PolygonizerHeadV12', 'PolygonizerHeadV13',
+    'PolygonizerHeadV14', 'PolygonizerHeadV15', 'PolygonizerHeadV17', 'PolygonizerHeadV18',
+    'PolygonizerHeadV19', 'PolygonizerHeadV20',
 ]

@@ -2,6 +2,7 @@
 import itertools
 from abc import ABCMeta, abstractmethod
 from typing import Sequence, Type, TypeVar
+import pdb
 
 import cv2
 import mmcv
@@ -727,8 +728,12 @@ class PolygonMasks(BaseInstanceMasks):
                     p = p.copy()
                     if flip_direction == 'horizontal':
                         p[0::2] = self.width - p[0::2]
+                        # need to maintain the clockwise and anticlockwise direction
+                        p = p.reshape(-1,2)[::-1].reshape(-1)
                     elif flip_direction == 'vertical':
                         p[1::2] = self.height - p[1::2]
+                        # need to maintain the clockwise and anticlockwise direction
+                        p = p.reshape(-1,2)[::-1].reshape(-1)
                     else:
                         p[0::2] = self.width - p[0::2]
                         p[1::2] = self.height - p[1::2]
@@ -778,11 +783,21 @@ class PolygonMasks(BaseInstanceMasks):
                     else:
                         cropped = [cropped]
                     # one polygon may be cropped to multiple ones
+                    polygons = []
+                    poly_lens = []
                     for poly in cropped:
                         # ignore lines or points
                         if not isinstance(
                                 poly, geometry.Polygon) or not poly.is_valid:
                             continue
+                        polygons.append(poly)
+                        poly_lens.append(poly.length)
+
+                    # sort the polygons according to lengths
+                    sorted_idx = np.argsort(np.array(poly_lens))[::-1]
+
+                    for i in sorted_idx:
+                        poly = polygons[i]
                         coords = np.asarray(poly.exterior.coords)
                         # remove an extra identical vertex at the end
                         coords = coords[:-1]
@@ -1006,6 +1021,21 @@ class PolygonMasks(BaseInstanceMasks):
                                device=device)
         ndarray_masks = self.to_ndarray()
         return torch.tensor(ndarray_masks, dtype=dtype, device=device)
+
+    def to_json(self, scale=1.):
+        import shapely
+
+        poly_jsons = []
+        for poly_per_obj in self.masks:
+            cropped_poly_per_obj = []
+            coords = [(x.reshape(-1,2) * scale).tolist() for x in poly_per_obj]
+            poly_json = dict(
+                type='Polygon',
+                coordinates=coords
+            )
+            poly_jsons.append(poly_json)
+
+        return poly_jsons
 
     @classmethod
     def random(cls,

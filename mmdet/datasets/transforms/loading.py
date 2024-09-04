@@ -15,6 +15,7 @@ from mmdet.registry import TRANSFORMS
 from mmdet.structures.bbox import get_box_type
 from mmdet.structures.bbox.box_type import autocast_box_type
 from mmdet.structures.mask import BitmapMasks, PolygonMasks
+import pdb
 
 
 @TRANSFORMS.register_module()
@@ -255,6 +256,7 @@ class LoadAnnotations(MMCV_LoadAnnotations):
     def __init__(
             self,
             with_mask: bool = False,
+            with_poly_json: bool = False,
             poly2mask: bool = True,
             box_type: str = 'hbox',
             # use for semseg
@@ -263,6 +265,7 @@ class LoadAnnotations(MMCV_LoadAnnotations):
             **kwargs) -> None:
         super(LoadAnnotations, self).__init__(**kwargs)
         self.with_mask = with_mask
+        self.with_poly_json = with_poly_json
         self.poly2mask = poly2mask
         self.box_type = box_type
         self.reduce_zero_label = reduce_zero_label
@@ -384,6 +387,7 @@ class LoadAnnotations(MMCV_LoadAnnotations):
         """
         h, w = results['ori_shape']
         gt_masks = self._process_masks(results)
+
         if self.poly2mask:
             gt_masks = BitmapMasks(
                 [self._poly2mask(mask, h, w) for mask in gt_masks], h, w)
@@ -428,6 +432,29 @@ class LoadAnnotations(MMCV_LoadAnnotations):
         results['gt_seg_map'] = gt_semantic_seg
         results['ignore_index'] = self.ignore_index
 
+    def _load_poly_json(self, results):
+        features = []
+        for instance in results.get('instances', []):
+            gt_mask = instance['mask']
+            # If the annotation of segmentation mask is invalid,
+            # ignore the whole instance.
+            if isinstance(gt_mask, list):
+                rings = [
+                    np.array(polygon).reshape(-1, 2).tolist() for polygon in gt_mask
+                    if len(polygon) % 2 == 0 and len(polygon) >= 6
+                ]
+
+            feature = dict(
+                type='Polygon',
+                coordinates=rings
+            )
+            features.append(feature)
+
+        results['gt_poly_jsons'] = features
+        return results
+
+
+
     def transform(self, results: dict) -> dict:
         """Function to load multiple types annotations.
 
@@ -447,6 +474,9 @@ class LoadAnnotations(MMCV_LoadAnnotations):
             self._load_masks(results)
         if self.with_seg:
             self._load_seg_map(results)
+        if self.with_poly_json:
+            self._load_poly_json(results)
+
         return results
 
     def __repr__(self) -> str:

@@ -2,6 +2,7 @@
 import torch
 from mmcv.ops import point_sample
 from torch import Tensor
+import pdb
 
 
 def get_uncertainty(mask_preds: Tensor, labels: Tensor) -> Tensor:
@@ -86,3 +87,44 @@ def get_uncertain_point_coords_with_randomness(
             batch_size, num_random_points, 2, device=mask_preds.device)
         point_coords = torch.cat((point_coords, rand_roi_coords), dim=1)
     return point_coords
+
+def get_point_coords_around_ring(ring, max_W, num_samples=2048, buffer=0.2):
+    bbox = torch.cat([ring.min(dim=0)[0], ring.max(dim=0)[0]])
+
+    W = bbox[2] - bbox[0]
+    H = bbox[3] - bbox[1]
+
+    new_bbox = torch.stack([bbox[0] - W * buffer, bbox[1] - H * buffer, bbox[2] + W * buffer, bbox[3] + H * buffer])
+    new_bbox = new_bbox.clamp(0, max_W)
+    x_min, y_min, x_max, y_max = new_bbox
+
+    x_samples = torch.rand(num_samples, device=ring.device) * (x_max - x_min) + x_min
+    y_samples = torch.rand(num_samples, device=ring.device) * (y_max - y_min) + y_min
+
+    # Combine x and y coordinates
+    samples = torch.stack((x_samples, y_samples), dim=1)
+
+    return samples
+
+def get_point_coords_around_ring_v2(ring, max_W, num_samples=2048, max_offsets=5):
+    N = ring.shape[0]
+    random_idxes = torch.randint(N, (num_samples,))
+    random_offsets = (torch.rand((num_samples, 2), device=ring.device) - 0.5) * 2 * max_offsets
+
+    samples = ring[random_idxes] + random_offsets
+    # samples = samples.clamp(0, max_W)
+
+    return samples
+
+"""
+def get_point_coords_around_ring_v2(ring, max_W, num_samples=2048, max_offsets=5):
+    N = ring.shape[0]
+    random_idxes = torch.randint(N, (num_samples,))
+    random_offsets = (torch.rand((num_samples, 2), device=ring.device) - 0.5) * 2 * max_offsets
+
+    samples = ring[random_idxes] + random_offsets
+    # samples = samples.clamp(0, max_W-1)
+    samples = samples.round().clamp(0, max_W-1).long().unique(dim=0)
+
+    return samples
+"""
