@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/datasets/crowd_ai_bs16.py', '../_base_/default_runtime.py',
+    '../_base_/datasets/crowd_ai_bs32.py', '../_base_/default_runtime.py',
 ]
 data_preprocessor = dict(
     type='DetDataPreprocessor',
