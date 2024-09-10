@@ -195,9 +195,8 @@ optim_wrapper = dict(
 
 max_epochs=50
 param_scheduler = [
-    # dict(
-    #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
-    #     end=1000),
+    dict(
+        type='LinearLR', start_factor=0.001, by_epoch=False, begin=0, end=1000),
     dict(
         type='MultiStepLR',
         begin=0,
