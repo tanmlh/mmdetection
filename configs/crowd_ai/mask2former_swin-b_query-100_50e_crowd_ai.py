@@ -1,9 +1,6 @@
 _base_ = [
     '../_base_/datasets/crowd_ai_bs16.py', '../_base_/default_runtime.py',
 ]
-custom_imports = dict(
-    imports=['mmpretrain.models'], allow_failed_imports=False)
-
 data_preprocessor = dict(
     type='DetDataPreprocessor',
     mean=[123.675, 116.28, 103.53],
@@ -24,29 +21,41 @@ model = dict(
     type='Mask2Former',
     data_preprocessor=data_preprocessor,
     backbone=dict(
-        type='mmpretrain.ConvNeXt',
-        arch='base',
-        out_indices=[0, 1, 2, 3],
-        drop_path_rate=0.4,
-        layer_scale_init_value=1.0,
-        gap_before_final_norm=False,
+        _delete_=True,
+        type='SwinTransformer',
+        embed_dims=96,
+        # depths=[2, 2, 6, 2],
+        depths=[2, 2, 18, 2],
+        num_heads=[3, 6, 12, 24],
+        window_size=7,
+        mlp_ratio=4,
+        qkv_bias=True,
+        qk_scale=None,
+        drop_rate=0.,
+        attn_drop_rate=0.,
+        drop_path_rate=0.3,
+        patch_norm=True,
+        out_indices=(0, 1, 2, 3),
+        with_cp=False,
+        convert_weights=True,
+        frozen_stages=-1,
         init_cfg=dict(
             type='Pretrained',
-            # checkpoint='https://download.openmmlab.com/mmclassification/v0/convnext-v2/convnext-v2-base_3rdparty-fcmae_in1k_20230104-8a798eaf.pth',
-            # checkpoint='https://download.openmmlab.com/mmclassification/v0/convnext/downstream/convnext-tiny_3rdparty_32xb128-noema_in1k_20220301-795e9634.pth',
-            prefix='backbone.')
+            # checkpoint='https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_tiny_patch4_window7_224.pth'
+            checkpoint='https://github.com/SwinTransformer/storage/releases/download/v1.0.0/swin_base_patch4_window12_384_22k.pth'  # noqa
+        )  # noqa
     ),
     panoptic_head=dict(
         type='Mask2FormerHead',
-        # in_channels=[256, 512, 1024, 2048],  # pass to pixel_decoder inside
+        in_channels=[256, 512, 1024, 2048],  # pass to pixel_decoder inside
         # in_channels=[128, 256, 512, 1024],
-        in_channels=[96, 192, 384, 768],
+        # in_channels=[96, 192, 384, 768],
         strides=[4, 8, 16, 32],
         feat_channels=256,
         out_channels=256,
         num_things_classes=num_things_classes,
         num_stuff_classes=num_stuff_classes,
-        num_queries=300,
+        num_queries=100,
         num_transformer_feat_level=3,
         pixel_decoder=dict(
             type='MSDeformAttnPixelDecoder',
@@ -185,9 +194,9 @@ optim_wrapper = dict(
 
 max_epochs=50
 param_scheduler = [
-    dict(
-        type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
-        end=1000),
+    # dict(
+    #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
+    #     end=1000),
     dict(
         type='MultiStepLR',
         begin=0,
@@ -219,7 +228,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'mask2former_convnext-t_query-300_50e_crowd_ai',
+            name = 'mask2former_swin-b_query-100_50e_crowd_ai',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
