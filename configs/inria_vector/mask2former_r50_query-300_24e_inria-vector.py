@@ -1,9 +1,6 @@
 _base_ = [
-    '../_base_/datasets/crowd_ai_bs16.py', '../_base_/default_runtime.py',
+    '../_base_/datasets/inria_vector.py', '../_base_/default_runtime.py',
 ]
-custom_imports = dict(
-    imports=['mmpretrain.models'], allow_failed_imports=False)
-
 data_preprocessor = dict(
     type='DetDataPreprocessor',
     mean=[123.675, 116.28, 103.53],
@@ -24,23 +21,19 @@ model = dict(
     type='Mask2Former',
     data_preprocessor=data_preprocessor,
     backbone=dict(
-        type='mmpretrain.ConvNeXt',
-        arch='tiny',
-        out_indices=[0, 1, 2, 3],
-        drop_path_rate=0.4,
-        layer_scale_init_value=1.0,
-        gap_before_final_norm=False,
-        init_cfg=dict(
-            type='Pretrained',
-            # checkpoint='https://download.openmmlab.com/mmclassification/v0/convnext-v2/convnext-v2-base_3rdparty-fcmae_in1k_20230104-8a798eaf.pth',
-            checkpoint='https://download.openmmlab.com/mmclassification/v0/convnext/downstream/convnext-tiny_3rdparty_32xb128-noema_in1k_20220301-795e9634.pth',
-            prefix='backbone.')
+        type='ResNet',
+        depth=50,
+        num_stages=4,
+        out_indices=(0, 1, 2, 3),
+        frozen_stages=-1,
+        norm_cfg=dict(type='BN', requires_grad=False),
+        norm_eval=True,
+        style='pytorch',
+        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')
     ),
     panoptic_head=dict(
         type='Mask2FormerHead',
-        # in_channels=[256, 512, 1024, 2048],  # pass to pixel_decoder inside
-        # in_channels=[128, 256, 512, 1024],
-        in_channels=[96, 192, 384, 768],
+        in_channels=[256, 512, 1024, 2048],  # pass to pixel_decoder inside
         strides=[4, 8, 16, 32],
         feat_channels=256,
         out_channels=256,
@@ -138,7 +131,7 @@ model = dict(
         semantic_on=False,
         instance_on=True,
         # max_per_image is for instance segmentation.
-        max_per_image=100,
+        max_per_image=200,
         iou_thr=0.8,
         # In Mask2Former's panoptic postprocessing,
         # it will filter mask area where score is less than 0.5 .
@@ -148,18 +141,12 @@ model = dict(
     init_cfg=None)
 
 val_evaluator = [
-    # dict(
-    #     type='CocoPanopticMetric',
-    #     ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
-    #     # ann_file=data_root + 'annotations/panoptic_val2017.json',
-    #     seg_prefix=data_root + 'annotations/panoptic_val2017/',
-    #     backend_args={{_base_.backend_args}}),
     dict(
         type='CocoMetric',
-        ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        # ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
+        ann_file='/home/Datasets/Dataset4EO/AerialImageDataset/val/annotation.json',
         metric=['segm'],
-        backend_args={{_base_.backend_args}})
+        backend_args={{_base_.backend_args}}),
 ]
 test_evaluator = val_evaluator
 
@@ -183,7 +170,7 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=50
+max_epochs=24
 param_scheduler = [
     dict(
         type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
@@ -193,7 +180,7 @@ param_scheduler = [
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[40],
+        milestones=[18],
         gamma=0.1)
 ]
 
@@ -207,10 +194,11 @@ default_hooks = dict(
         type='CheckpointHook',
         by_epoch=True,
         save_last=True,
-        max_keep_ckpts=15,
+        max_keep_ckpts=1,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=100)
 )
 
 vis_backends = [
@@ -219,13 +207,14 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'mask2former_convnext-t_query-300_50e_crowd_ai',
+            name = 'mask2former_r50_query-300_24e_inria-vector',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
+# vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
@@ -235,4 +224,11 @@ visualizer = dict(
 #   - `enable` means enable scaling LR automatically
 #       or not by default.
 #   - `base_batch_size` = (8 GPUs) x (2 samples per GPU).
-auto_scale_lr = dict(enable=True, base_batch_size=16 * 2)
+auto_scale_lr = dict(enable=False, base_batch_size=8)
+
+# train_dataloader = dict(
+#     dataset=dict(
+#         ann_file='val/val.json',
+#         data_prefix=dict(img='val/image'),
+#     )
+# )

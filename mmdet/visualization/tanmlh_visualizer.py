@@ -615,6 +615,7 @@ class TanmlhVisualizer(Visualizer):
         # edge_colors = np.array([[0.,0.,1.,.5]] * len(colors))
 
         ax = gdf.plot(color=face_colors, edgecolor=edge_colors, linewidth=W // 2)
+        # ax = gdf.plot(color=face_colors, edgecolor=edge_colors, linewidth=W // 4)
         ax.imshow(img)
 
         for i, polygon in enumerate(polygons):
@@ -622,7 +623,9 @@ class TanmlhVisualizer(Visualizer):
             coords = [ring.xy for ring in rings]
             for xi, yi in coords:
                 # ax.plot(xi[:-1], yi[:-1], marker="o", color='blue', markersize=W // 2)
-                ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=W)
+                # ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=W)
+                ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=W // 3 * 2)
+                # ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=W//2)
                 # ax.plot(xi[:3], yi[:3], marker="o", color='red', markersize=W)
                 # ax.plot(xi[4:7], yi[4:7], marker="o", color='green', markersize=W)
                 # ax.plot(xi, yi, marker="o", color='red', markersize=W // 2)
@@ -639,7 +642,7 @@ class TanmlhVisualizer(Visualizer):
 
         # plt.tight_layout(pad=0)
         temp_name = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        plt.savefig(f'.{temp_name}.png', dpi=3)
+        plt.savefig(f'.{temp_name}.png', dpi=9)
         vis_img = cv2.imread(f'.{temp_name}.png')
         os.remove(f'.{temp_name}.png')
 

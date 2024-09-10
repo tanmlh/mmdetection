@@ -29,7 +29,8 @@ from ..utils import get_point_coords_around_ring, get_point_coords_around_ring_v
 class DPPolygonizeHead(nn.Module):
 
     def __init__(self, poly_cfg, decoder=None, feat_channels=256, loss_dice_wn=None,
-                 loss_poly_reg=None, loss_poly_cls=None, loss_poly_right_ang=None):
+                 loss_poly_reg=None, loss_poly_cls=None, loss_poly_right_ang=None,
+                 loss_poly_ang=None):
         super().__init__()
 
         self.poly_cfg = poly_cfg
@@ -69,6 +70,9 @@ class DPPolygonizeHead(nn.Module):
             if self.poly_cfg.get('apply_right_angle_loss', False):
                 self.loss_poly_right_ang = MODELS.build(loss_poly_right_ang)
 
+            if self.poly_cfg.get('apply_angle_loss', False):
+                self.loss_poly_ang = MODELS.build(loss_poly_ang)
+
     def loss(
         self, pred_jsons, gt_jsons, W, device='cpu', points_coords=None,
         point_targets=None, mask_targets=None, **kwargs
@@ -99,6 +103,8 @@ class DPPolygonizeHead(nn.Module):
         losses = dict()
 
         match_idxes = []
+        seg_inds = []
+        matched_masks = []
         for i in range(K):
             prim_target = self._get_poly_targets_single(
                 prim_reg_pred[i].detach().cpu(), gt_jsons[i],
@@ -106,6 +112,12 @@ class DPPolygonizeHead(nn.Module):
             )
             prim_reg_targets[i] = prim_target['prim_reg_targets']
             prim_cls_targets[i] = prim_target['prim_cls_targets']
+            if 'seg_inds' in prim_target:
+                seg_inds.append(prim_target['seg_inds'])
+
+            if 'matched_mask' in prim_target:
+                matched_masks.append(prim_target['matched_mask'])
+
             if is_complete[i]:
                 seg_mask = (sampled_segments[i] >= 0).all(dim=-1)
                 pred_poly = shapely.geometry.Polygon(sampled_segments[i][seg_mask].tolist())
@@ -121,12 +133,14 @@ class DPPolygonizeHead(nn.Module):
         # decoded_rings = polygon_utils.batch_decode_ring_dp(prim_reg_pred, sizes, max_step_size=64, lam=4, device=prim_reg_pred.device)
         if self.poly_cfg.get('apply_poly_iou_loss', False):
             # prim_reg_pred = torch.cat([prim_reg_pred, prim_reg_pred[:, :1]], dim=1)
-            dp, dp_points = polygon_utils.batch_decode_ring_dp(
-                prim_reg_pred, sizes, max_step_size=sizes.max(),
-                lam=self.poly_cfg.get('lam', 4),
-                device=device, return_both=True,
-                result_device=device
-            )
+            if K > 0:
+                dp, dp_points = polygon_utils.batch_decode_ring_dp(
+                    prim_reg_pred, sizes, max_step_size=sizes.max(),
+                    lam=self.poly_cfg.get('lam', 4),
+                    device=device, return_both=True,
+                    result_device=device
+                )
+                dp_points = [x[:-1] for x in dp_points]
         else:
             dp = polygon_utils.batch_decode_ring_dp(
                 prim_reg_pred, sizes, max_step_size=sizes.max(),
@@ -141,7 +155,6 @@ class DPPolygonizeHead(nn.Module):
 
         losses['loss_dp'] = (opt_dis_comp.sum() + opt_dis_incomp.sum()) / K * self.poly_cfg.get('loss_weight_dp', 0.01)
 
-        dp_points = [x[:-1] for x in dp_points]
         if self.poly_cfg.get('apply_poly_iou_loss', False):
 
             if len(match_idxes) > 0:
@@ -265,6 +278,32 @@ class DPPolygonizeHead(nn.Module):
 
             losses['loss_poly_right_ang'] = loss_right_ang
 
+        if self.poly_cfg.get('apply_angle_loss', False):
+            loss_ang = prim_reg_pred[:0].sum()
+            diffs = []
+            for i in range(K):
+                cur_inds = seg_inds[i]
+                cur_mask = matched_masks[i]
+                cur_pred = prim_reg_pred[i][cur_inds]
+
+                cur_target = prim_reg_targets[i][cur_inds]
+                cur_angle_mask = torch.zeros_like(cur_mask, device=cur_pred.device)
+                cur_angle_mask[1:-1] = cur_mask[:-2] & cur_mask[1:-1] & cur_mask[2:]
+
+                pred_angle, pred_angle_mask = polygon_utils.calculate_polygon_angles(cur_pred)
+                target_angle, target_angle_mask = polygon_utils.calculate_polygon_angles(cur_target)
+
+                cur_mask = cur_angle_mask & pred_angle_mask & target_angle_mask
+                # self.loss_poly_ang(pred_angle[cur_mask], target_angle[cur_mask])
+                if cur_mask.any():
+                    max_diff = (pred_angle[cur_mask] - target_angle[cur_mask]).abs().max()
+                    diffs.append(max_diff)
+
+            if len(diffs) > 0:
+                loss_ang = torch.stack(diffs).mean() * self.loss_poly_ang.loss_weight
+
+            losses['loss_poly_ang'] = loss_ang
+
         return losses
 
     def forward(self, poly_pred, W, mask_feat=None, query_feat=None, batch_idxes=None):
@@ -386,6 +425,8 @@ class DPPolygonizeHead(nn.Module):
 
         targets['prim_cls_targets'] = prim_cls_targets
         targets['prim_reg_targets'] = prim_reg_targets
+        targets['seg_inds'] = seg_inds
+        targets['matched_mask'] = valid_mask
 
         return targets
 

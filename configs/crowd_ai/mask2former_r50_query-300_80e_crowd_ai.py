@@ -1,9 +1,6 @@
 _base_ = [
     '../_base_/datasets/crowd_ai_bs16.py', '../_base_/default_runtime.py',
 ]
-custom_imports = dict(
-    imports=['mmpretrain.models'], allow_failed_imports=False)
-
 data_preprocessor = dict(
     type='DetDataPreprocessor',
     mean=[123.675, 116.28, 103.53],
@@ -24,23 +21,19 @@ model = dict(
     type='Mask2Former',
     data_preprocessor=data_preprocessor,
     backbone=dict(
-        type='mmpretrain.ConvNeXt',
-        arch='tiny',
-        out_indices=[0, 1, 2, 3],
-        drop_path_rate=0.4,
-        layer_scale_init_value=1.0,
-        gap_before_final_norm=False,
-        init_cfg=dict(
-            type='Pretrained',
-            # checkpoint='https://download.openmmlab.com/mmclassification/v0/convnext-v2/convnext-v2-base_3rdparty-fcmae_in1k_20230104-8a798eaf.pth',
-            checkpoint='https://download.openmmlab.com/mmclassification/v0/convnext/downstream/convnext-tiny_3rdparty_32xb128-noema_in1k_20220301-795e9634.pth',
-            prefix='backbone.')
+        type='ResNet',
+        depth=50,
+        num_stages=4,
+        out_indices=(0, 1, 2, 3),
+        frozen_stages=-1,
+        norm_cfg=dict(type='BN', requires_grad=False),
+        norm_eval=True,
+        style='pytorch',
+        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')
     ),
     panoptic_head=dict(
         type='Mask2FormerHead',
-        # in_channels=[256, 512, 1024, 2048],  # pass to pixel_decoder inside
-        # in_channels=[128, 256, 512, 1024],
-        in_channels=[96, 192, 384, 768],
+        in_channels=[256, 512, 1024, 2048],  # pass to pixel_decoder inside
         strides=[4, 8, 16, 32],
         feat_channels=256,
         out_channels=256,
@@ -183,11 +176,11 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=50
+max_epochs=80
 param_scheduler = [
-    dict(
-        type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
-        end=1000),
+    # dict(
+    #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
+    #     end=1000),
     dict(
         type='MultiStepLR',
         begin=0,
@@ -207,7 +200,7 @@ default_hooks = dict(
         type='CheckpointHook',
         by_epoch=True,
         save_last=True,
-        max_keep_ckpts=15,
+        max_keep_ckpts=1,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
     visualization=dict(type='TanmlhVisualizationHook', draw=True)
@@ -219,7 +212,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'mask2former_convnext-t_query-300_50e_crowd_ai',
+            name = 'mask2former_r50_query-300_50e_crowd_ai_v2',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
@@ -235,4 +228,4 @@ visualizer = dict(
 #   - `enable` means enable scaling LR automatically
 #       or not by default.
 #   - `base_batch_size` = (8 GPUs) x (2 samples per GPU).
-auto_scale_lr = dict(enable=True, base_batch_size=16 * 2)
+auto_scale_lr = dict(enable=True, base_batch_size=16)

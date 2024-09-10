@@ -30,10 +30,14 @@ import shapely.prepared
 import shapely.validation
 import shapely
 import rasterio
+from rasterio.features import shapes
 from sklearn.cluster import DBSCAN
 from sklearn.linear_model import LinearRegression
 from sklearn.cluster import AffinityPropagation
 from scipy.optimize import linear_sum_assignment
+
+from skimage.measure import label as ski_label
+from skimage.measure import regionprops
 
 
 def is_polygon_clockwise(polygon):
@@ -2946,8 +2950,8 @@ def calculate_polygon_angles(coords, eps=1e-6):
     """
 
     # Normalize the vectors
-    norm_vectors_next = vectors_next / (torch.norm(vectors_next, dim=1, keepdim=True))
-    norm_vectors_prev = vectors_prev / (torch.norm(vectors_prev, dim=1, keepdim=True))
+    norm_vectors_next = vectors_next / (torch.norm(vectors_next, dim=1, keepdim=True) + eps)
+    norm_vectors_prev = vectors_prev / (torch.norm(vectors_prev, dim=1, keepdim=True) + eps)
 
     # Calculate dot products between consecutive vectors
     dot_products = torch.sum(norm_vectors_next * norm_vectors_prev, dim=1)
@@ -3548,13 +3552,26 @@ def assemble_rings(rings, ring_idxes, format='coco'):
 
             if format == 'coco':
                 cur_ring = cur_ring.view(-1).tolist()
-            elif format == 'json':
-                cur_ring = dict(
-                    type='Polygon',
-                    coordinates=cur_ring.view(-1,2).tolist()
-                )
+            elif format == 'json' or format == 'shapely':
+                cur_ring = coordinates=cur_ring.view(-1,2).tolist()
+                # cur_ring = dict(
+                #     type='Polygon',
+                # )
 
             cur_polygon.append(cur_ring)
+
+        if format == 'json':
+            cur_polygon = dict(
+                type='Polygon',
+                coordinates=cur_polygon
+            )
+
+        elif format == 'shapely':
+            cur_polygon = dict(
+                type='Polygon',
+                coordinates=cur_polygon
+            )
+            cur_polygon = shapely.geometry.shape(cur_polygon)
 
         polygons.append(cur_polygon)
 
@@ -3610,7 +3627,7 @@ def cal_pairwise_dis(points, sizes, device='cpu', eps=1e-8, max_step_size=20, re
 
     return new_cost
 
-def batchify(sizes):
+def batchify(sizes, max_diff_ratio=1.5):
 
     sorted_idxes = np.argsort(np.array(sizes))
     base_size = 512 * 512 * 4
@@ -3625,7 +3642,9 @@ def batchify(sizes):
     for i, idx in enumerate(sorted_idxes):
         if sizes[idx] < 4:
             break
-        if (cur_cnt + 1) * sizes[idx] ** 2 <= base_size:
+        if ((cur_cnt + 1) * sizes[idx] ** 2 <= base_size) and \
+           (len(cur_bin) == 0 or (sizes[idx] / cur_sizes[0] <= max_diff_ratio)):
+
             cur_bin.append(idx)
             cur_sizes.append(sizes[idx])
             cur_cnt += 1
@@ -3848,7 +3867,8 @@ def sample_rings_from_json(polygons, array_type='torch', only_exterior=False, **
 
 
 
-def simplify_poly_jsons(poly_jsons, lam=4, max_step_size=80, device='cpu', scale=1., **kwargs):
+def simplify_poly_jsons(poly_jsons, lam=4, max_step_size=80, device='cpu', scale=1.,
+                        return_format='coco', **kwargs):
 
     all_rings, ring_sizes, poly2ring_idxes = sample_rings_from_json(poly_jsons, **kwargs)
 
@@ -3866,8 +3886,8 @@ def simplify_poly_jsons(poly_jsons, lam=4, max_step_size=80, device='cpu', scale
 
         cur_rings = [all_rings[x][:-1] for x in idxes]
         cur_rings = pad_longest_cat(cur_rings)
-        cur_rings = cur_rings.cuda()
-        sizes = torch.tensor(sizes).cuda() - 1
+        cur_rings = cur_rings.to(device)
+        sizes = torch.tensor(sizes, device=device) - 1
         # pdb.set_trace()
         decoded_rings = batch_decode_ring_dp(
             cur_rings, sizes, max_step_size=max_step_size, lam=lam, device=cur_rings.device
@@ -3877,7 +3897,7 @@ def simplify_poly_jsons(poly_jsons, lam=4, max_step_size=80, device='cpu', scale
         for j, idx in enumerate(idxes):
             new_all_rings[idx] = decoded_rings[j] if len(decoded_rings[j]) >= 4 else all_rings[idx][:-1]
 
-    simp_polygons = assemble_rings(new_all_rings, poly2ring_idxes, format='coco')
+    simp_polygons = assemble_rings(new_all_rings, poly2ring_idxes, format=return_format)
 
     return simp_polygons
 
@@ -3977,15 +3997,20 @@ def render_poly(polygons, H=512, W=512, points=None, point_labels=None):
 
     plt.close()
 
+def clip_by_bound(poly, im_h, im_w):
+    """
+    Bound poly coordinates by image shape
+    """
+    p_x = poly[:, 0]
+    p_y = poly[:, 1]
+    p_x = np.clip(p_x, 0.0, im_w-1)
+    p_y = np.clip(p_y, 0.0, im_h-1)
+    return np.concatenate((p_x[:, np.newaxis], p_y[:, np.newaxis]), axis=1)
+
 def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='per_mask', scores=None):
 
-    import time
-    coords_time = 0
-    t0 = time.time()
-
-    N, H, W  = imgs.shape
-
     if mode == 'per_mask':
+        N, H, W  = imgs.shape
         polygons = []
         imgs_cpu = imgs.cpu().numpy()
 
@@ -4001,18 +4026,16 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
         x_max, x_min = x_max.cpu().numpy(), x_min.cpu().numpy()
         y_max, y_min = y_max.cpu().numpy(), y_min.cpu().numpy()
 
-        t1 = time.time()
-
         num_coords = 0
         idxes = []
         for i in range(N):
             cropped_img = imgs_cpu[i, y_min[i]:y_max[i]+1, x_min[i]:x_max[i]+1]
             if cropped_img.sum() > 0:
                 idxes.append(i)
-                cur_shapes = rasterio.features.shapes(cropped_img, mask=cropped_img > 0)
+                # cur_shapes = rasterio.features.shapes(cropped_img, mask=cropped_img > 0)
+                cur_shapes = shapes(cropped_img, mask=cropped_img > 0)
                 offset = np.array([x_min[i], y_min[i]]).reshape(1,2)
                 all_coords = []
-                tt0 = time.time()
                 for shape, value in cur_shapes:
                     coords = shape['coordinates']
                     scaled_coords = []
@@ -4025,7 +4048,6 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
 
                     all_coords.extend(scaled_coords)
 
-                coords_time += time.time() - tt0
                 polygons.append(
                     dict(
                         type='Polygon',
@@ -4035,6 +4057,7 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
         return polygons, idxes
 
     elif mode == 'aggregate_mask':
+        N, H, W  = imgs.shape
         assert scores is not None
 
         mask = (imgs > 0).any(dim=0).cpu().numpy()
@@ -4070,8 +4093,112 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
 
         return polygons, idxes
 
-    # print(f'{N} {num_coords} all time: {time.time() - t0} {t1-t0} coords time: {coords_time}')
+    elif mode == 'simple_mask':
 
+        H, W = imgs.shape
+        mask = (imgs > 0).cpu().numpy()
+
+        cur_shapes = rasterio.features.shapes(imgs.numpy(), mask=mask)
+        polygons = []
+
+        idxes = []
+        for shape, value in cur_shapes:
+            coords = shape['coordinates']
+            scaled_coords = []
+            for x in coords:
+                x = np.array(x) * scale
+                if clockwise:
+                    x = x[::-1]
+                scaled_coords.append(x.tolist())
+
+            polygons.append(
+                dict(type='Polygon', coordinates=scaled_coords)
+            )
+            idxes.append(int(value))
+
+        idxes = torch.tensor(idxes, dtype=torch.long)
+
+        return polygons, idxes
+
+    elif mode == 'cv2_single_mask':
+
+        N, H, W  = imgs.shape
+        polygons = []
+        idxes = []
+
+        imgs_cpu = imgs.cpu().numpy()
+
+        # Set the bound before polygonization and use high-res mask
+        arange_H = torch.arange(1, H+1, device=imgs.device).unsqueeze(0)
+        arange_W = torch.arange(1, W+1, device=imgs.device).unsqueeze(0)
+        col_idx = (imgs.sum(dim=1) > 0) * arange_H
+        row_idx = (imgs.sum(dim=2) > 0) * arange_W
+        x_max, y_max = col_idx.max(dim=1)[0] - 1, row_idx.max(dim=1)[0] - 1
+        row_idx = torch.where(row_idx == 0, H+1, row_idx)
+        col_idx = torch.where(col_idx == 0, W+1, col_idx)
+        x_min, y_min = col_idx.min(dim=1)[0] - 1, row_idx.min(dim=1)[0] - 1
+
+        x_max, x_min = x_max.cpu().numpy(), x_min.cpu().numpy()
+        y_max, y_min = y_max.cpu().numpy(), y_min.cpu().numpy()
+
+        num_coords = 0
+        for i in range(N):
+            b_im = imgs_cpu[i, y_min[i]:y_max[i]+1, x_min[i]:x_max[i]+1]
+
+            if b_im.sum() > 0:
+
+                coordinates = []
+                offset = np.array([x_min[i], y_min[i]]).reshape(1,2)
+                prop_mask = b_im
+                padded_binary_mask = np.pad(prop_mask, pad_width=1, mode='constant', constant_values=0)
+                contours, hierarchy = cv2.findContours(padded_binary_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                # contours, hierarchy = cv2.findContours(padded_binary_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+
+                if len(contours) > 1:
+                    intp = []
+                    ext_contours = [contours[x].reshape(-1,2) - 1 for x in range(len(contours)) if hierarchy[0][x][3] < 0]
+                    ext_areas = np.array([cv2.contourArea(x) for x in ext_contours])
+                    top_contour_idx = np.argmax(ext_areas)
+                    extp = ext_contours[top_contour_idx]
+
+                    if len(extp) > 3:
+
+                        intp = [contours[x].reshape(-1,2) - 1 for x in range(len(contours)) if hierarchy[0][x][3] == top_contour_idx]
+                        intp = [x for x in intp if len(x) > 3]
+
+                        coordinates = [extp]
+                        for x in intp:
+                            coordinates.append(x)
+
+                elif len(contours) == 1:
+                    contour = np.array([c.reshape(-1).tolist() for c in contours[0]])
+                    contour -= 1
+                    # contour = clip_by_bound(contour, b_im.shape[0], b_im.shape[1])
+                    if len(contour) > 3:
+                        coordinates = [contour.tolist()]
+                        # closed_c = np.concatenate((contour, contour[0].reshape(-1, 2))).tolist()
+                        # coordinates = [closed_c]
+
+                if len(coordinates) > 0:
+                    new_coords = []
+                    for x in coordinates:
+                        x = (np.array(x) + offset + 0.5) * scale
+                        if clockwise:
+                            x = x[::-1]
+
+                        x = np.concatenate((x, x[0].reshape(-1, 2)))
+                        new_coords.append(x.tolist())
+
+                    cur_polygon = dict(
+                        type='Polygon',
+                        coordinates=new_coords
+                    )
+                    polygons.append(cur_polygon)
+                    idxes.append(i)
+
+        idxes = torch.tensor(idxes, dtype=torch.long)
+
+        return polygons, idxes
 
 def vis_data_wandb(data):
     import matplotlib.pyplot as plt
