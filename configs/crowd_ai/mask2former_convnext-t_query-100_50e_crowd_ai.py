@@ -185,9 +185,9 @@ optim_wrapper = dict(
 
 max_epochs=50
 param_scheduler = [
-    dict(
-        type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
-        end=1000),
+    # dict(
+    #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
+    #     end=1000),
     dict(
         type='MultiStepLR',
         begin=0,
@@ -235,4 +235,4 @@ visualizer = dict(
 #   - `enable` means enable scaling LR automatically
 #       or not by default.
 #   - `base_batch_size` = (8 GPUs) x (2 samples per GPU).
-auto_scale_lr = dict(enable=True, base_batch_size=16 * 4)
+auto_scale_lr = dict(enable=True, base_batch_size=16 * 1)
