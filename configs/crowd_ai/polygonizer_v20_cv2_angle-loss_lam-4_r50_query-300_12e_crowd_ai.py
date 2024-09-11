@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/datasets/whu_mix_vector.py', '../_base_/default_runtime.py',
+    '../_base_/datasets/crowd_ai_bs16.py', '../_base_/default_runtime.py',
 ]
 data_preprocessor = dict(
     type='DetDataPreprocessor',
@@ -14,14 +14,13 @@ data_preprocessor = dict(
     # batch_augments=batch_augments
 )
 
-load_from='work_dirs/mask2former_r50_query-300_50e_whu-mix-vector/epoch_50.pth'
+load_from='work_dirs/mask2former_r50_query-300_50e_crowd_ai/epoch_50.pth'
 num_things_classes = 1
 num_stuff_classes = 0
 num_classes = num_things_classes + num_stuff_classes
 model = dict(
     type='PolyFormerV2',
     data_preprocessor=data_preprocessor,
-    # test_mode='slide_inference',
     frozen_parameters=[
         'backbone',
         'panoptic_head.pixel_decoder',
@@ -86,11 +85,8 @@ model = dict(
             use_ref_rings=False,
             apply_poly_iou_loss=True,
             sample_points=True,
-            # max_sample_offsets=10,
-            # num_samples=1024,
             max_step_size=128,
             polygonize_mode='cv2_single_mask',
-            # polygonize_mode='per_mask',
             apply_right_angle_loss=False,
             apply_angle_loss=True
         ),
@@ -271,8 +267,8 @@ val_evaluator = [
         type='CocoMetric',
         # ann_file=data_root + 'annotations/instances_val2017.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/val/val.json',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
-        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
+        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
         metric=['segm'],
@@ -332,7 +328,7 @@ default_hooks = dict(
         max_keep_ckpts=10,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5000000)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=50)
 )
 
 vis_backends = [
@@ -341,14 +337,14 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'polygonizer_v20_cv2_angle-loss_lam-4_r50_query-300_24e_whu-mix-vector',
+            name = 'polygonizer_v20_cv2_angle-loss_lam-4_r50_query-300_12e_crowd_ai',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
-vis_backends = [dict(type='LocalVisBackend')]
+# vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
