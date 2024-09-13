@@ -73,7 +73,7 @@ model = dict(
             reg_targets_type='vertice',
             return_poly_json=False,
             use_gt_jsons=False,
-            mask_cls_thre=0.0,
+            mask_cls_thre=0.1,
             lam=4,
             map_features=True,
             max_align_dis=15,
@@ -85,7 +85,7 @@ model = dict(
             use_ref_rings=False,
             apply_poly_iou_loss=True,
             sample_points=True,
-            max_step_size=128,
+            max_step_size=64,
             polygonize_mode='cv2_single_mask',
             apply_right_angle_loss=False,
             apply_angle_loss=True
@@ -247,7 +247,7 @@ model = dict(
         semantic_on=False,
         instance_on=True,
         # max_per_image is for instance segmentation.
-        max_per_image=200,
+        max_per_image=100,
         iou_thr=0.8,
         # In Mask2Former's panoptic postprocessing,
         # it will filter mask area where score is less than 0.5 .
@@ -267,7 +267,7 @@ val_evaluator = [
         type='CocoMetric',
         # ann_file=data_root + 'annotations/instances_val2017.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/val/val.json',
-        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
@@ -301,7 +301,7 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=24
+max_epochs=12
 param_scheduler = [
     dict(
         type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
@@ -311,7 +311,7 @@ param_scheduler = [
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[18],
+        milestones=[9],
         gamma=0.1)
 ]
 
@@ -328,7 +328,7 @@ default_hooks = dict(
         max_keep_ckpts=10,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=50)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=500000)
 )
 
 vis_backends = [
@@ -344,16 +344,16 @@ vis_backends = [
         ),
     )
 ]
-# vis_backends = [dict(type='LocalVisBackend')]
+vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
 
 auto_scale_lr = dict(enable=False, base_batch_size=8)
 
-# train_dataloader = dict(
-#     dataset=dict(
-#         ann_file='val/val.json',
-#         data_prefix=dict(img='val/image'),
-#     )
-# )
+train_dataloader = dict(
+    dataset=dict(
+        # ann_file='val/val.json',
+        ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+    )
+)
