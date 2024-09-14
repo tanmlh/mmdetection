@@ -3913,8 +3913,12 @@ def sample_segments_from_rings(rings, max_len):
         new_rings.append(new_ring)
         is_complete.append(K <= max_len)
 
-    new_rings = torch.stack(new_rings, dim=0)
-    is_complete = torch.tensor(is_complete, device=rings[0].device)
+    if len(new_rings) > 0:
+        new_rings = torch.stack(new_rings, dim=0)
+        is_complete = torch.tensor(is_complete, device=rings[0].device)
+    else:
+        new_rings = torch.zeros(0, max_len, 2)
+        is_complete = torch.zeros(0).bool()
 
     return new_rings, is_complete
 

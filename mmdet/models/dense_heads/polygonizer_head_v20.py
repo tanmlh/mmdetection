@@ -733,13 +733,6 @@ class PolygonizerHeadV20(MaskFormerHead):
             poly_mask = (poly_mask > 0).to(torch.uint8)
             nonzero_mask = poly_mask.sum(dim=[1,2]) > 0
 
-            # poly_mask_jsons = self.polygonize_mask(
-            #     poly_mask,
-            #     scale=4. / scale,
-            #     sample_points=False
-            # )
-
-            t0 = time.time()
             poly_mask_jsons, poly2mask_idxes = polygon_utils.polygonize_mask(
                 poly_mask,
                 scale=4. / scale,
@@ -747,34 +740,32 @@ class PolygonizerHeadV20(MaskFormerHead):
                 mode=self.poly_cfg.get('polygonize_mode', 'per_mask'),
             )
 
-            """
-            t1 = time.time()
-            poly_mask_jsons2, poly2mask_idxes = polygon_utils.polygonize_mask(
-                poly_mask,
-                scale=4. / scale,
-                sample_points=False,
-                mode='per_mask',
-            )
-            t2 = time.time()
+            if len(poly_mask_jsons) > 0:
 
-            print(f'{t1-t0} {t2-t1}')
-            """
+                gt_poly_jsons = [gt_poly_jsons[x] for x in poly2mask_idxes]
+                poly_mask_feat = self.mask_feat_proj(mask_feat)
 
-            gt_poly_jsons = [gt_poly_jsons[x] for x in poly2mask_idxes]
-            poly_mask_feat = self.mask_feat_proj(mask_feat)
+                losses_poly = self.dp_polygonize_head.loss(
+                    poly_mask_jsons, gt_poly_jsons,
+                    W=mask_preds.shape[-1] * 4,
+                    # mask_feat=poly_mask_feat[batch_idxes] if self.poly_cfg.get('use_point_feat_in_poly_feat', False) else None,
+                    mask_feat=poly_mask_feat if self.poly_cfg.get('use_point_feat_in_poly_feat', False) else None,
+                    query_feat=query_feat[mask_weights > 0][poly2mask_idxes] if self.poly_cfg.get('use_point_feat_in_poly_feat', False) else None,
+                    batch_idxes=batch_idxes[poly2mask_idxes],
+                    device=mask_preds.device,
+                    points_coords=points_coords[poly2mask_idxes] if not self.poly_cfg.get('sample_points', False) else None,
+                    point_targets=mask_point_targets.view(K, -1)[poly2mask_idxes] if not self.poly_cfg.get('sample_points', False) else None,
+                    mask_targets=mask_targets[poly2mask_idxes]
+                )
+            else:
+                losses_poly = dict(
+                    loss_dp=mask_preds[:0].sum(),
+                    loss_poly_iou=mask_preds[:0].sum(),
+                    loss_poly_reg=mask_preds[:0].sum()
+                )
+                if self.poly_cfg.get('apply_angle_loss', False):
+                    losses_poly['loss_poly_ang'] = mask_preds[:0].sum()
 
-            losses_poly = self.dp_polygonize_head.loss(
-                poly_mask_jsons, gt_poly_jsons,
-                W=mask_preds.shape[-1] * 4,
-                # mask_feat=poly_mask_feat[batch_idxes] if self.poly_cfg.get('use_point_feat_in_poly_feat', False) else None,
-                mask_feat=poly_mask_feat if self.poly_cfg.get('use_point_feat_in_poly_feat', False) else None,
-                query_feat=query_feat[mask_weights > 0][poly2mask_idxes] if self.poly_cfg.get('use_point_feat_in_poly_feat', False) else None,
-                batch_idxes=batch_idxes[poly2mask_idxes],
-                device=mask_preds.device,
-                points_coords=points_coords[poly2mask_idxes] if not self.poly_cfg.get('sample_points', False) else None,
-                point_targets=mask_point_targets.view(K, -1)[poly2mask_idxes] if not self.poly_cfg.get('sample_points', False) else None,
-                mask_targets=mask_targets[poly2mask_idxes]
-            )
             losses.update(losses_poly)
 
         return losses
@@ -1210,200 +1201,9 @@ class PolygonizerHeadV20(MaskFormerHead):
 
 
             else:
-                pdb.set_trace()
-                cur_mask_pred = cur_mask_pred[:0]
-                cur_cls_pred = cur_cls_pred[:0]
-                simp_polygons = []
-
-                batch_simp_polygons.append(simp_polygons)
-                batch_mask_preds.append(cur_mask_pred)
-                batch_cls_preds.append(cur_cls_pred)
-
-
-            """
-            for i in range(B):
-                # temp = mask_pred[scores > 0.5]
-                # prob_map = temp.max(dim=0)[0] if len(temp) > 0 else torch.zeros(H,W, device=mask_pred.device)
-                # pred_results['prob_map'] = prob_map
-                # pred_results['prob_map'] = torch.stack([1-temp, temp], dim=1).mean(dim=0)
-                # thre = self.poly_cfg.get('mask_cls_thre', 0.1)
-                # valid_mask = (scores > thre) & (poly_mask.sum(dim=[2,3]) > 0)
-                # poly_mask[~valid_mask] = 0
-
-                # valid_poly_mask = poly_mask[topk_mask]
-                mask_cls_thre = self.poly_cfg.get('mask_cls_thre', None)
-                if mask_cls_thre is not None:
-                    valid_mask = (cur_scores > mask_cls_thre)
-                    poly_mask[~valid_mask] = 0
-
-                t2 = time.time()
-
-                poly_pred_jsons, poly2mask_idxes = polygon_utils.polygonize_mask(
-                    poly_mask,
-                    scale=4. / scale,
-                    sample_points=False,
-                    mode=self.poly_cfg.get('polygonize_mode', 'per_mask'),
-                    # scores=scores[topk_mask]
-                    scores=cur_scores
-                )
-
-                t3 = time.time()
-                pred_results['poly_pred_jsons'] = poly_pred_jsons
-
-                # if self.poly_cfg.get('return_poly_json', False):
-                #     pred_results['query_idxes'] = valid_mask.nonzero()
-                #     pred_results['poly_jsons'] = poly_pred_jsons
-                #     pred_results['poly_ind_mask'] = valid_mask
-                #     pred_results['poly2mask_idxes'] = poly2mask_idxes
-
-                #     return pred_results
-
-                sampled_segs, seg_sizes, poly2segs_idxes, segs2poly_idxes = polygon_utils.sample_segments_from_json(
-                    poly_pred_jsons, interval=self.poly_cfg.get('step_size'),
-                    seg_len=N, stride=self.poly_cfg.get('stride_size', 64),
-                    num_min_bins=self.poly_cfg.get('num_min_bins', 8),
-                    num_bins=self.poly_cfg.get('num_bins', None),
-                )
-                sampled_segs = sampled_segs.astype(np.float32)
-
-                t4 = time.time()
-                t5 = time.time()
-
-                if len(sampled_segs) > 0:
-                    query_idx = topk_mask.view(-1).nonzero().view(-1)[segs2poly_idxes[:,0]]
-                    query_feat = query_feat_list[-1].view(B*Q, -1)[query_idx]
-                    poly_pred = torch.from_numpy(sampled_segs).to(query_feat.device).float()
-                    # norm_poly_pred = (poly_pred / (W * 4) - 0.5) * 2
-
-                    batch_idxes = torch.zeros(len(poly_pred), dtype=torch.long)
-                    dp_pred_results = self.dp_polygonize_head(
-                        poly_pred, W * 4, mask_feat=mask_features[i:i+1], query_feat=query_feat, batch_idxes=batch_idxes
-                    )
-                    prim_reg_pred = dp_pred_results['prim_reg_pred'] * scale2
-
-                    if self.poly_cfg.get('apply_cls', False):
-                        prim_cls_pred = dp_pred_results['prim_cls_pred'].cpu()
-                    else:
-                        prim_cls_pred = torch.zeros_like(prim_reg_pred).cpu()
-
-
-                    rings, poly2ring_idxes, others = polygon_utils.assemble_segments(
-                        prim_reg_pred.cpu(), poly2segs_idxes, seg_sizes,
-                        length=self.poly_cfg.get('num_inter_points', 96),
-                        stride=self.poly_cfg.get('stride_size', 64),
-                        prim_cls_pred=prim_cls_pred,
-                        sampled_rings=sampled_segs * scale2
-                    )
-
-                    pred_results['pred_rings'] = rings
-                    pred_results['sampled_rings'] = others['sampled_rings']
-
-                    cur_mask_pred = cur_mask_pred[poly2mask_idxes]
-                    cur_cls_pred = cur_cls_pred[poly2mask_idxes]
-
-                    t5 = time.time()
-                    if self.poly_cfg.get('poly_decode_type', 'dp') == 'dp':
-                        rings = [ring.to(poly_pred.device) for ring in rings]
-                        # rings = [torch.cat([ring, ring[:1]], dim=0) for ring in rings]
-
-                        simp_rings = polygon_utils.simplify_rings_dp(
-                            rings, lam=self.poly_cfg.get('lam', 4), device=x[0].device,
-                            ref_rings=sampled_rings if self.poly_cfg.get('use_ref_rings', False) else None,
-                            drop_last=False
-                        )
-                        simp_rings = [x[:-1] for x in simp_rings]
-
-                        simp_polygons = polygon_utils.assemble_rings(
-                            simp_rings, poly2ring_idxes
-                        )
-
-                    elif self.poly_cfg.get('poly_decode_type', 'dp') == 'dp_without_reg':
-                        sampled_rings = others['sampled_rings']
-                        rings = [ring.to(poly_pred.device) for ring in sampled_rings]
-                        # rings = [torch.cat([ring, ring[:1]], dim=0) for ring in rings]
-
-                        simp_rings = polygon_utils.simplify_rings_dp(
-                            rings, lam=self.poly_cfg.get('lam', 4), device=x[0].device,
-                            ref_rings=sampled_rings if self.poly_cfg.get('use_ref_rings', False) else None,
-                            drop_last=False
-                        )
-                        simp_rings = [x[:-1] for x in simp_rings]
-
-                        simp_polygons = polygon_utils.assemble_rings(
-                            simp_rings, poly2ring_idxes
-                        )
-
-                    elif self.poly_cfg.get('poly_decode_type', 'dp') == 'cls':
-                        rings_cls = others['prim_cls_pred']
-                        sampled_rings = others['sampled_rings']
-                        simp_rings = []
-                        for i, cur_ring in enumerate(rings):
-                            cur_ring_scores = F.softmax(rings_cls[i], dim=1)[:,1]
-                            left_roll = torch.roll(cur_ring_scores, dims=[0], shifts=[-1])
-                            right_roll = torch.roll(cur_ring_scores, dims=[0], shifts=[1])
-                            nms_mask = (cur_ring_scores >= left_roll) & (cur_ring_scores >= right_roll)
-                            cur_mask = cur_ring_scores > self.poly_cfg.get('prim_cls_thre', 0.1)
-                            cur_mask = cur_mask & nms_mask
-                            if cur_mask.sum() >= 3:
-                                simp_rings.append(cur_ring[cur_mask])
-                            else:
-                                simp_rings.append(sampled_rings[i])
-
-                        simp_polygons = polygon_utils.assemble_rings(
-                            simp_rings, poly2ring_idxes
-                        )
-
-                    elif self.poly_cfg.get('poly_decode_type', 'dp') == 'douglas-peucker':
-                        simp_rings = []
-                        sampled_rings = others['sampled_rings']
-                        for sampled_ring in sampled_rings:
-                            cur_ring = shapely.geometry.Polygon(sampled_ring)
-                            cur_ring = torch.tensor(cur_ring.simplify(
-                                tolerance=self.poly_cfg.get('douglas_tolerance', 1.5)
-                            ).exterior.coords)
-                            if len(cur_ring) >= 3:
-                                simp_rings.append(cur_ring)
-                            else:
-                                simp_rings.append(sampled_rings[i])
-
-                        simp_polygons = polygon_utils.assemble_rings(
-                            simp_rings, poly2ring_idxes
-                        )
-
-                    elif self.poly_cfg.get('poly_decode_type', 'dp') == 'none':
-                        simp_polygons = []
-                        for i, poly_json in enumerate(poly_pred_jsons):
-                            cur_polygon = polygon_utils.poly_json2coco(poly_json, scale=scale2)
-                            simp_polygons.append(cur_polygon)
-
-                    elif self.poly_cfg.get('poly_decode_type', 'dp') == 'sampled':
-                        sampled_rings = others['sampled_rings']
-                        simp_polygons = polygon_utils.assemble_rings(
-                            sampled_rings, poly2ring_idxes
-                        )
-
-                    elif self.poly_cfg.get('poly_decode_type', 'dp') == 'reg_sampled':
-                        simp_polygons = polygon_utils.assemble_rings(
-                            rings, poly2ring_idxes
-                        )
-
-                    else:
-                        simp_rings = rings
-
-                else:
-                    cur_mask_pred = cur_mask_pred[:0]
-                    cur_cls_pred = cur_cls_pred[:0]
-                    simp_polygons = []
-
-                batch_simp_polygons.append(simp_polygons)
-                batch_mask_preds.append(cur_mask_pred)
-                batch_cls_preds.append(cur_cls_pred)
-
-            t6 = time.time()
-
-            times = [t1-t0, t2-t1, t3-t2, t4-t3, t5-t4, t6-t5]
-            print(times)
-            """
+                batch_mask_preds.append(mask_pred[:,:0])
+                batch_cls_preds.append(cls_pred[:,:0])
+                batch_simp_polygons.append([])
 
             assert len(batch_simp_polygons) == B
 

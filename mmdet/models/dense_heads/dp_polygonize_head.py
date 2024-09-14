@@ -82,6 +82,8 @@ class DPPolygonizeHead(nn.Module):
         N = self.poly_cfg.get('num_inter_points', 96)
         K = len(pred_jsons)
 
+        assert K > 0
+
         sampled_rings, _, _ = polygon_utils.sample_rings_from_json(
             pred_jsons, interval=self.poly_cfg.get('step_size'), only_exterior=True,
             num_min_bins=self.poly_cfg.get('num_min_bins', 8),
@@ -332,7 +334,7 @@ class DPPolygonizeHead(nn.Module):
             poly_feat += point_feat
 
             if self.poly_cfg.get('use_decoded_feat_in_poly_feat', False):
-                poly_feat += query_feat.detach().view(K, 1, -1)
+                poly_feat += query_feat.detach().view(K, 1, C)
 
         poly_pos_embed = self.positional_encoding(poly_feat.new_zeros(K, N, 1))
         poly_pos_embed = poly_pos_embed.view(K, C, N).permute(0,2,1)
