@@ -1000,6 +1000,10 @@ class PolygonizerHeadV20(MaskFormerHead):
 
         if return_poly:
 
+            batch_simp_polygons = []
+            batch_mask_preds = []
+            batch_cls_preds = []
+
             mask_pred = mask_pred_list[-1]
             cls_pred = cls_pred_list[-1]
             scores = F.softmax(cls_pred, dim=-1)[...,0]
@@ -1106,16 +1110,117 @@ class PolygonizerHeadV20(MaskFormerHead):
                 pred_results['pred_rings'] = rings
                 pred_results['sampled_rings'] = others['sampled_rings']
 
+                for i in range(B):
+                    cur_mask = poly2mask_idxes[poly2mask_idxes // max_per_image == i]
+                    batch_mask_preds.append(mask_pred.view(-1, H, W)[cur_mask])
+                    batch_cls_preds.append(cls_pred.view(-1, 2)[cur_mask])
+
+
+                if self.poly_cfg.get('poly_decode_type', 'dp') == 'dp':
+                    rings = [ring.to(poly_pred.device) for ring in rings]
+                    # rings = [torch.cat([ring, ring[:1]], dim=0) for ring in rings]
+
+                    simp_rings = polygon_utils.simplify_rings_dp(
+                        rings, lam=self.poly_cfg.get('lam', 4), device=x[0].device,
+                        ref_rings=sampled_rings if self.poly_cfg.get('use_ref_rings', False) else None,
+                        drop_last=False
+                    )
+                    simp_rings = [x[:-1] for x in simp_rings]
+
+                    simp_polygons = polygon_utils.assemble_rings(
+                        simp_rings, poly2ring_idxes
+                    )
+
+                elif self.poly_cfg.get('poly_decode_type', 'dp') == 'dp_without_reg':
+                    sampled_rings = others['sampled_rings']
+                    rings = [ring.to(poly_pred.device) for ring in sampled_rings]
+                    # rings = [torch.cat([ring, ring[:1]], dim=0) for ring in rings]
+
+                    simp_rings = polygon_utils.simplify_rings_dp(
+                        rings, lam=self.poly_cfg.get('lam', 4), device=x[0].device,
+                        ref_rings=sampled_rings if self.poly_cfg.get('use_ref_rings', False) else None,
+                        drop_last=False
+                    )
+                    simp_rings = [x[:-1] for x in simp_rings]
+
+                    simp_polygons = polygon_utils.assemble_rings(
+                        simp_rings, poly2ring_idxes
+                    )
+
+                elif self.poly_cfg.get('poly_decode_type', 'dp') == 'cls':
+                    rings_cls = others['prim_cls_pred']
+                    sampled_rings = others['sampled_rings']
+                    simp_rings = []
+                    for i, cur_ring in enumerate(rings):
+                        cur_ring_scores = F.softmax(rings_cls[i], dim=1)[:,1]
+                        left_roll = torch.roll(cur_ring_scores, dims=[0], shifts=[-1])
+                        right_roll = torch.roll(cur_ring_scores, dims=[0], shifts=[1])
+                        nms_mask = (cur_ring_scores >= left_roll) & (cur_ring_scores >= right_roll)
+                        cur_mask = cur_ring_scores > self.poly_cfg.get('prim_cls_thre', 0.1)
+                        cur_mask = cur_mask & nms_mask
+                        if cur_mask.sum() >= 3:
+                            simp_rings.append(cur_ring[cur_mask])
+                        else:
+                            simp_rings.append(sampled_rings[i])
+
+                    simp_polygons = polygon_utils.assemble_rings(
+                        simp_rings, poly2ring_idxes
+                    )
+
+                elif self.poly_cfg.get('poly_decode_type', 'dp') == 'douglas-peucker':
+                    simp_rings = []
+                    sampled_rings = others['sampled_rings']
+                    for sampled_ring in sampled_rings:
+                        cur_ring = shapely.geometry.Polygon(sampled_ring)
+                        cur_ring = torch.tensor(cur_ring.simplify(
+                            tolerance=self.poly_cfg.get('douglas_tolerance', 1.5)
+                        ).exterior.coords)
+                        if len(cur_ring) >= 3:
+                            simp_rings.append(cur_ring)
+                        else:
+                            simp_rings.append(sampled_rings[i])
+
+                    simp_polygons = polygon_utils.assemble_rings(
+                        simp_rings, poly2ring_idxes
+                    )
+
+                elif self.poly_cfg.get('poly_decode_type', 'dp') == 'none':
+                    simp_polygons = []
+                    for i, poly_json in enumerate(poly_pred_jsons):
+                        cur_polygon = polygon_utils.poly_json2coco(poly_json, scale=scale2)
+                        simp_polygons.append(cur_polygon)
+
+                elif self.poly_cfg.get('poly_decode_type', 'dp') == 'sampled':
+                    sampled_rings = others['sampled_rings']
+                    simp_polygons = polygon_utils.assemble_rings(
+                        sampled_rings, poly2ring_idxes
+                    )
+
+                elif self.poly_cfg.get('poly_decode_type', 'dp') == 'reg_sampled':
+                    simp_polygons = polygon_utils.assemble_rings(
+                        rings, poly2ring_idxes
+                    )
+
+                else:
+                    simp_rings = rings
+
+                for i in range(B):
+                    cur_idxes = (poly2mask_idxes // max_per_image == i).nonzero().view(-1)
+                    batch_simp_polygons.append([simp_polygons[x] for x in cur_idxes])
+
+
+            else:
                 pdb.set_trace()
+                cur_mask_pred = cur_mask_pred[:0]
+                cur_cls_pred = cur_cls_pred[:0]
+                simp_polygons = []
 
-                mask_pred = mask_pred[poly2mask_idxes]
-                cls_pred = cls_pred[poly2mask_idxes]
+                batch_simp_polygons.append(simp_polygons)
+                batch_mask_preds.append(cur_mask_pred)
+                batch_cls_preds.append(cur_cls_pred)
 
 
-
-            batch_simp_polygons = []
-            batch_mask_preds = []
-            batch_cls_preds = []
+            """
             for i in range(B):
                 # temp = mask_pred[scores > 0.5]
                 # prob_map = temp.max(dim=0)[0] if len(temp) > 0 else torch.zeros(H,W, device=mask_pred.device)
@@ -1298,6 +1403,7 @@ class PolygonizerHeadV20(MaskFormerHead):
 
             times = [t1-t0, t2-t1, t3-t2, t4-t3, t5-t4, t6-t5]
             print(times)
+            """
 
             assert len(batch_simp_polygons) == B
 

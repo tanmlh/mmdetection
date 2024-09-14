@@ -14,7 +14,7 @@ data_preprocessor = dict(
     # batch_augments=batch_augments
 )
 
-load_from='work_dirs/mask2former_r50_query-300_50e_crowd_ai/epoch_50.pth'
+# load_from='work_dirs/mask2former_r50_query-300_50e_crowd_ai/epoch_50.pth'
 num_things_classes = 1
 num_stuff_classes = 0
 num_classes = num_things_classes + num_stuff_classes
@@ -22,15 +22,15 @@ model = dict(
     type='PolyFormerV2',
     data_preprocessor=data_preprocessor,
     frozen_parameters=[
-        'backbone',
-        'panoptic_head.pixel_decoder',
-        'panoptic_head.transformer_decoder',
-        'panoptic_head.decoder_input_projs',
-        'panoptic_head.query_embed',
-        'panoptic_head.query_feat',
-        'panoptic_head.level_embed',
-        'panoptic_head.cls_embed',
-        'panoptic_head.mask_embed',
+        # 'backbone',
+        # 'panoptic_head.pixel_decoder',
+        # 'panoptic_head.transformer_decoder',
+        # 'panoptic_head.decoder_input_projs',
+        # 'panoptic_head.query_embed',
+        # 'panoptic_head.query_feat',
+        # 'panoptic_head.level_embed',
+        # 'panoptic_head.cls_embed',
+        # 'panoptic_head.mask_embed',
     ],
     backbone=dict(
         type='ResNet',
