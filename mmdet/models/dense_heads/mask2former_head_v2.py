@@ -18,12 +18,14 @@ from mmdet.utils import (ConfigType, InstanceList, OptConfigType, OptMultiConfig
 from ..layers import Mask2FormerTransformerDecoder, SinePositionalEncoding
 from ..utils import get_uncertain_point_coords_with_randomness
 from ..utils import multi_apply, preprocess_panoptic_gt
+from ..utils import get_point_coords_around_ring, get_point_coords_around_ring_v2
 from .anchor_free_head import AnchorFreeHead
 from .maskformer_head import MaskFormerHead
+import mmdet.utils.tanmlh_polygon_utils as polygon_utils
 
 
 @MODELS.register_module()
-class Mask2FormerHead(MaskFormerHead):
+class Mask2FormerHeadV2(MaskFormerHead):
     """Implements the Mask2Former head.
 
     See `Masked-attention Mask Transformer for Universal Image
@@ -93,6 +95,7 @@ class Mask2FormerHead(MaskFormerHead):
                      naive_dice=True,
                      eps=1.0,
                      loss_weight=5.0),
+                 poly_cfg: OptConfigType = None,
                  train_cfg: OptConfigType = None,
                  test_cfg: OptConfigType = None,
                  init_cfg: OptMultiConfig = None,
@@ -143,6 +146,7 @@ class Mask2FormerHead(MaskFormerHead):
 
         self.test_cfg = test_cfg
         self.train_cfg = train_cfg
+        self.poly_cfg = poly_cfg
         if train_cfg:
             self.assigner = TASK_UTILS.build(self.train_cfg['assigner'])
             self.sampler = TASK_UTILS.build(
@@ -208,6 +212,28 @@ class Mask2FormerHead(MaskFormerHead):
         gt_poly_jsons_list = [
             gt_instances['masks'].to_json(scale=scale) for gt_instances in batch_gt_instances
         ]
+
+        W = batch_gt_instances[0].masks.width
+        sampled_gt_points_list = []
+        for gt_poly_jsons in gt_poly_jsons_list:
+            sampled_gt_points = []
+            for gt_poly_json in gt_poly_jsons:
+                rings, _, _ = polygon_utils.sample_rings_from_json(
+                    [gt_poly_json], interval=self.poly_cfg.get('step_size'), only_exterior=False,
+                    num_min_bins=self.poly_cfg.get('num_min_bins', 8),
+                    num_bins=self.poly_cfg.get('num_bins', None),
+                    num_max_bins = self.poly_cfg.get('num_max_bins')
+                )
+                rings = torch.cat(rings)
+                gt_sampled_coord = get_point_coords_around_ring_v2(
+                    rings, W,
+                    num_samples=self.poly_cfg.get('num_sample_points_around_gt', 1024),
+                    max_offsets=self.poly_cfg.get('max_sample_offsets', 5)
+                )
+                sampled_gt_points.append(gt_sampled_coord)
+
+            sampled_gt_points_list.append(sampled_gt_points)
+
         gt_semantic_segs = [
             None if gt_semantic_seg is None else gt_semantic_seg.sem_seg
             for gt_semantic_seg in batch_gt_semantic_segs
@@ -217,44 +243,87 @@ class Mask2FormerHead(MaskFormerHead):
                               num_stuff_list)
         labels, masks = targets
         batch_gt_instances = [
-            InstanceData(labels=label, masks=mask, poly_jsons=poly_json)
-            for label, mask, poly_json in zip(labels, masks, gt_poly_jsons_list)
+            InstanceData(labels=label, masks=mask, poly_jsons=poly_json, sampled_gt_points=sampled_gt_points)
+            for label, mask, poly_json, sampled_gt_points in zip(labels, masks, gt_poly_jsons_list,
+                                              sampled_gt_points_list)
         ]
         return batch_gt_instances
 
-    def _get_targets_single(self, cls_score: Tensor, mask_pred: Tensor,
-                            gt_instances: InstanceData,
-                            img_meta: dict) -> Tuple[Tensor]:
-        """Compute classification and mask targets for one image.
+    def get_targets(
+        self,
+        cls_scores_list: List[Tensor],
+        mask_preds_list: List[Tensor],
+        batch_gt_instances: InstanceList,
+        batch_img_metas: List[dict],
+        return_sampling_results: bool = False
+    ) -> Tuple[List[Union[Tensor, int]]]:
+        """Compute classification and mask targets for all images for a decoder
+        layer.
 
         Args:
-            cls_score (Tensor): Mask score logits from a single decoder layer
-                for one image. Shape (num_queries, cls_out_channels).
-            mask_pred (Tensor): Mask logits for a single decoder layer for one
-                image. Shape (num_queries, h, w).
-            gt_instances (:obj:`InstanceData`): It contains ``labels`` and
-                ``masks``.
-            img_meta (dict): Image informtation.
+            cls_scores_list (list[Tensor]): Mask score logits from a single
+                decoder layer for all images. Each with shape (num_queries,
+                cls_out_channels).
+            mask_preds_list (list[Tensor]): Mask logits from a single decoder
+                layer for all images. Each with shape (num_queries, h, w).
+            batch_gt_instances (list[obj:`InstanceData`]): each contains
+                ``labels`` and ``masks``.
+            batch_img_metas (list[dict]): List of image meta information.
+            return_sampling_results (bool): Whether to return the sampling
+                results. Defaults to False.
 
         Returns:
-            tuple[Tensor]: A tuple containing the following for one image.
+            tuple: a tuple containing the following targets.
 
-                - labels (Tensor): Labels of each image. \
-                    shape (num_queries, ).
-                - label_weights (Tensor): Label weights of each image. \
-                    shape (num_queries, ).
-                - mask_targets (Tensor): Mask targets of each image. \
-                    shape (num_queries, h, w).
-                - mask_weights (Tensor): Mask weights of each image. \
-                    shape (num_queries, ).
-                - pos_inds (Tensor): Sampled positive indices for each \
-                    image.
-                - neg_inds (Tensor): Sampled negative indices for each \
-                    image.
-                - sampling_result (:obj:`SamplingResult`): Sampling results.
+                - labels_list (list[Tensor]): Labels of all images.\
+                    Each with shape (num_queries, ).
+                - label_weights_list (list[Tensor]): Label weights\
+                    of all images. Each with shape (num_queries, ).
+                - mask_targets_list (list[Tensor]): Mask targets of\
+                    all images. Each with shape (num_queries, h, w).
+                - mask_weights_list (list[Tensor]): Mask weights of\
+                    all images. Each with shape (num_queries, ).
+                - avg_factor (int): Average factor that is used to average\
+                    the loss. When using sampling method, avg_factor is
+                    usually the sum of positive and negative priors. When
+                    using `MaskPseudoSampler`, `avg_factor` is usually equal
+                    to the number of positive priors.
+
+            additional_returns: This function enables user-defined returns from
+                `self._get_targets_single`. These returns are currently refined
+                to properties at each feature map (i.e. having HxW dimension).
+                The results will be concatenated after the end.
         """
+        results = multi_apply(self._get_targets_single, cls_scores_list,
+                              mask_preds_list, batch_gt_instances,
+                              batch_img_metas)
+        (labels_list, label_weights_list, mask_targets_list, mask_weights_list,
+         pos_inds_list, neg_inds_list, sampling_results_list) = results[:7]
+        rest_results = list(results[7:])
+
+        avg_factor = sum(
+            [results.avg_factor for results in sampling_results_list])
+
+        res = (labels_list, label_weights_list, mask_targets_list,
+               mask_weights_list, avg_factor)
+        if return_sampling_results:
+            res = res + (sampling_results_list)
+
+        return res + tuple(rest_results)
+
+    def _get_targets_single(
+        self, cls_score: Tensor, mask_pred: Tensor,
+        gt_instances: InstanceData, img_meta: dict,
+    ) -> Tuple[Tensor]:
+
+        # cls_score = pred_results['cls_pred']
+        # mask_pred = pred_results['mask_pred']
+
         gt_labels = gt_instances.labels
         gt_masks = gt_instances.masks
+        gt_poly_jsons = gt_instances.poly_jsons
+        sampled_gt_points = gt_instances.sampled_gt_points
+
         # sample points
         num_queries = cls_score.shape[0]
         num_gts = gt_labels.shape[0]
@@ -292,15 +361,17 @@ class Mask2FormerHead(MaskFormerHead):
                                     self.num_classes,
                                     dtype=torch.long)
         labels[pos_inds] = gt_labels[sampling_result.pos_assigned_gt_inds]
-        label_weights = gt_labels.new_ones((self.num_queries, ))
+        label_weights = gt_labels.new_ones((self.num_queries,))
 
         # mask target
         mask_targets = gt_masks[sampling_result.pos_assigned_gt_inds]
         mask_weights = mask_pred.new_zeros((self.num_queries, ))
         mask_weights[pos_inds] = 1.0
+        # poly_targets = [gt_poly_jsons[x] for x in sampling_result.pos_assigned_gt_inds]
+        poly_targets = [sampled_gt_points[x] for x in sampling_result.pos_assigned_gt_inds]
 
         return (labels, label_weights, mask_targets, mask_weights, pos_inds,
-                neg_inds, sampling_result)
+                neg_inds, sampling_result, poly_targets)
 
     def _loss_by_feat_single(self, cls_scores: Tensor, mask_preds: Tensor,
                              batch_gt_instances: List[InstanceData],
@@ -326,8 +397,9 @@ class Mask2FormerHead(MaskFormerHead):
         cls_scores_list = [cls_scores[i] for i in range(num_imgs)]
         mask_preds_list = [mask_preds[i] for i in range(num_imgs)]
         (labels_list, label_weights_list, mask_targets_list, mask_weights_list,
-         avg_factor) = self.get_targets(cls_scores_list, mask_preds_list,
+         avg_factor, poly_targets) = self.get_targets(cls_scores_list, mask_preds_list,
                                         batch_gt_instances, batch_img_metas)
+
         # shape (batch_size, num_queries)
         labels = torch.stack(labels_list, dim=0)
         # shape (batch_size, num_queries)
@@ -337,13 +409,6 @@ class Mask2FormerHead(MaskFormerHead):
         # shape (batch_size, num_queries)
         mask_weights = torch.stack(mask_weights_list, dim=0)
 
-        if self.poly_cfg.get('apply_gt_ring_sample',  False):
-            gt_jsons = [x.poly_jsons for x in batch_gt_instances]
-            sampled_rings, _, _ = polygon_utils.sample_rings_from_json(
-                pred_jsons, interval=self.poly_cfg.get('step_size'), only_exterior=True,
-                num_min_bins=self.poly_cfg.get('num_min_bins', 8),
-                num_bins=self.poly_cfg.get('num_bins', None)
-            )
 
         # classfication loss
         # shape (batch_size * num_queries, )
@@ -376,8 +441,19 @@ class Mask2FormerHead(MaskFormerHead):
                 mask_preds.unsqueeze(1), None, self.num_points,
                 self.oversample_ratio, self.importance_sample_ratio)
             # shape (num_total_gts, h, w) -> (num_total_gts, num_points)
-            mask_point_targets = point_sample(
-                mask_targets.unsqueeze(1).float(), points_coords).squeeze(1)
+
+        # assert len(sampled_gt_points) == len(mask_preds)
+
+        if self.poly_cfg is not None and self.poly_cfg.get('apply_gt_ring_sample',  False):
+            sampled_gt_points = []
+            for cur_poly_jsons in poly_targets:
+                sampled_gt_points += cur_poly_jsons
+            sampled_gt_points = torch.stack(sampled_gt_points).to(points_coords.device)
+            points_coords = torch.cat([points_coords, sampled_gt_points], dim=1)
+
+        mask_point_targets = point_sample(
+            mask_targets.unsqueeze(1).float(), points_coords).squeeze(1)
+
         # shape (num_queries, h, w) -> (num_queries, num_points)
         mask_point_preds = point_sample(
             mask_preds.unsqueeze(1), points_coords).squeeze(1)

@@ -31,6 +31,7 @@ from .guided_anchor_head import FeatureAdaption, GuidedAnchorHead
 from .lad_head import LADHead
 from .ld_head import LDHead
 from .mask2former_head import Mask2FormerHead
+from .mask2former_head_v2 import Mask2FormerHeadV2
 from .maskformer_head import MaskFormerHead
 from .nasfcos_head import NASFCOSHead
 from .paa_head import PAAHead
@@ -95,5 +96,5 @@ __all__ = [
     'PolygonizerHeadV6', 'PolygonizerHeadV7', 'PolygonizerHeadV8', 'PolygonizerHeadV9',
     'PolygonizerHeadV10', 'PolygonizerHeadV11', 'PolygonizerHeadV12', 'PolygonizerHeadV13',
     'PolygonizerHeadV14', 'PolygonizerHeadV15', 'PolygonizerHeadV17', 'PolygonizerHeadV18',
-    'PolygonizerHeadV19', 'PolygonizerHeadV20',
+    'PolygonizerHeadV19', 'PolygonizerHeadV20', 'Mask2FormerHeadV2'
 ]

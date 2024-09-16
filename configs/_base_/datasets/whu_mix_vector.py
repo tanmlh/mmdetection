@@ -115,8 +115,8 @@ test_dataloader = dict(
         # ann_file='val/val.json',
 
         data_prefix=dict(img='test1/image'),
-        # ann_file='test1/test-small.json',
-        ann_file='test1/test.json',
+        ann_file='test1/test-small.json',
+        # ann_file='test1/test.json',
         # data_prefix=dict(img='test2/image'),
         # ann_file='test2/test-small.json',
         # ann_file='test2/test.json',
