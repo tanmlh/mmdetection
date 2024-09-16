@@ -337,14 +337,6 @@ class Mask2FormerHead(MaskFormerHead):
         # shape (batch_size, num_queries)
         mask_weights = torch.stack(mask_weights_list, dim=0)
 
-        if self.poly_cfg.get('apply_gt_ring_sample',  False):
-            gt_jsons = [x.poly_jsons for x in batch_gt_instances]
-            sampled_rings, _, _ = polygon_utils.sample_rings_from_json(
-                pred_jsons, interval=self.poly_cfg.get('step_size'), only_exterior=True,
-                num_min_bins=self.poly_cfg.get('num_min_bins', 8),
-                num_bins=self.poly_cfg.get('num_bins', None)
-            )
-
         # classfication loss
         # shape (batch_size * num_queries, )
         cls_scores = cls_scores.flatten(0, 1)
