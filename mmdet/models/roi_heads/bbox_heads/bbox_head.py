@@ -1,5 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import List, Optional, Tuple, Union
+import pdb
 
 import torch
 import torch.nn as nn
@@ -202,6 +203,8 @@ class BBoxHead(BaseModule):
         label_weights = pos_priors.new_zeros(num_samples)
         bbox_targets = pos_priors.new_zeros(num_samples, reg_dim)
         bbox_weights = pos_priors.new_zeros(num_samples, reg_dim)
+
+        pdb.set_trace()
         if num_pos > 0:
             labels[:num_pos] = pos_gt_labels
             pos_weight = 1.0 if cfg.pos_weight <= 0 else cfg.pos_weight
