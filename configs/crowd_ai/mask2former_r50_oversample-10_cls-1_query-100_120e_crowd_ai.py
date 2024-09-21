@@ -14,7 +14,7 @@ data_preprocessor = dict(
     # batch_augments=batch_augments
 )
 
-# load_from = 'work_dirs/mask2former_r50_oversample-10_cls-1_query-100_100e_crowd_ai/epoch_60.pth'
+load_from = 'work_dirs/mask2former_r50_oversample-10_cls-1_query-100_100e_crowd_ai/epoch_60.pth'
 num_things_classes = 1
 num_stuff_classes = 0
 num_classes = num_things_classes + num_stuff_classes
@@ -163,7 +163,7 @@ optim_wrapper = dict(
     type='OptimWrapper',
     optimizer=dict(
         type='AdamW',
-        lr=0.0001,
+        lr=0.00001,
         weight_decay=0.05,
         eps=1e-8,
         betas=(0.9, 0.999)),
@@ -177,7 +177,7 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=120
+max_epochs=20
 param_scheduler = [
     # dict(
     #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
@@ -187,7 +187,7 @@ param_scheduler = [
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[80],
+        milestones=[100],
         gamma=0.1)
 ]
 
