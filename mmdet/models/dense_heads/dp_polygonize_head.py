@@ -162,7 +162,6 @@ class DPPolygonizeHead(nn.Module):
         # losses['loss_dp'] = (opt_dis_comp.sum() + opt_dis_incomp.sum()) / K * self.poly_cfg.get('loss_weight_dp', 0.01)
 
         if self.poly_cfg.get('apply_poly_iou_loss', False):
-
             if len(match_idxes) > 0:
                 if points_coords is None:
                     # sample points and point_targets
