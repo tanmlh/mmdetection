@@ -30,7 +30,7 @@ class DPPolygonizeHead(nn.Module):
 
     def __init__(self, poly_cfg, decoder=None, feat_channels=256, loss_dice_wn=None,
                  loss_poly_reg=None, loss_poly_cls=None, loss_poly_right_ang=None,
-                 loss_poly_ang=None):
+                 loss_poly_ang=None, loss_poly_dp=None):
         super().__init__()
 
         self.poly_cfg = poly_cfg
@@ -64,6 +64,8 @@ class DPPolygonizeHead(nn.Module):
 
             self.loss_dice_wn = MODELS.build(loss_dice_wn)
             self.loss_poly_reg = MODELS.build(loss_poly_reg)
+            self.loss_poly_dp = MODELS.build(loss_poly_dp)
+
             if self.poly_cfg.get('apply_cls', False):
                 self.loss_poly_cls = MODELS.build(loss_poly_cls)
 
@@ -154,8 +156,10 @@ class DPPolygonizeHead(nn.Module):
 
         opt_dis_comp = torch.gather(dp[is_complete], 2, sizes[is_complete].unsqueeze(1).unsqueeze(1).repeat(1,N,1)).min(dim=1)[0]
         opt_dis_incomp = torch.gather(dp[~is_complete, 0], 1, sizes[~is_complete].unsqueeze(1)-1)
-
-        losses['loss_dp'] = (opt_dis_comp.sum() + opt_dis_incomp.sum()) / K * self.poly_cfg.get('loss_weight_dp', 0.01)
+        opt_dis = torch.cat([opt_dis_comp, opt_dis_incomp])
+        # avg_factor = 
+        losses['loss_dp'] = self.loss_poly_dp(opt_dis, torch.zeros_like(opt_dis))
+        # losses['loss_dp'] = (opt_dis_comp.sum() + opt_dis_incomp.sum()) / K * self.poly_cfg.get('loss_weight_dp', 0.01)
 
         if self.poly_cfg.get('apply_poly_iou_loss', False):
 

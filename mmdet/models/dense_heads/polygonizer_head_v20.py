@@ -125,6 +125,11 @@ class PolygonizerHeadV20(MaskFormerHead):
                      reduction='mean',
                      loss_weight=1.
                  ),
+                 loss_poly_dp: ConfigType = dict(
+                     type='SmoothL1Loss',
+                     reduction='mean',
+                     loss_weight=0.01
+                 ),
                  loss_poly_ang: ConfigType = dict(
                      type='SmoothL1Loss',
                      reduction='mean',
@@ -135,6 +140,7 @@ class PolygonizerHeadV20(MaskFormerHead):
                  init_cfg: OptMultiConfig = None,
                  poly_cfg: OptConfigType = None,
                  **kwargs) -> None:
+
         super(AnchorFreeHead, self).__init__(init_cfg=init_cfg)
         self.num_things_classes = num_things_classes
         self.num_stuff_classes = num_stuff_classes
@@ -195,7 +201,7 @@ class PolygonizerHeadV20(MaskFormerHead):
         self.dp_polygonize_head = DPPolygonizeHead(
             poly_cfg, dp_polygonize_head, feat_channels,
             loss_dice_wn, loss_poly_reg, loss_poly_cls,
-            loss_poly_right_ang, loss_poly_ang
+            loss_poly_right_ang, loss_poly_ang, loss_poly_dp
         )
 
         if train_cfg:

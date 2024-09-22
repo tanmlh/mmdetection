@@ -85,11 +85,8 @@ model = dict(
             use_ref_rings=False,
             apply_poly_iou_loss=True,
             sample_points=True,
-            # max_sample_offsets=10,
-            # num_samples=1024,
             max_step_size=128,
             polygonize_mode='cv2_single_mask',
-            # polygonize_mode='per_mask',
             apply_right_angle_loss=False,
             apply_angle_loss=True
         ),

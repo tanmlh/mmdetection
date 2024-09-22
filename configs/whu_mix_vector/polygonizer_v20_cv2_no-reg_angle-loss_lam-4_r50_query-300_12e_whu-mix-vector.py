@@ -332,7 +332,7 @@ default_hooks = dict(
         max_keep_ckpts=10,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=50)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
 )
 
 vis_backends = [
@@ -341,23 +341,23 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'polygonizer_v20_cv2_no-reg_angle-loss_lam-4_r50_query-300_12e_whu-mix-vector',
+            name = 'test_polygonizer_v20_cv2_no-reg_angle-loss_lam-4_r50_query-300_12e_whu-mix-vector',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
-# vis_backends = [dict(type='LocalVisBackend')]
+vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
 
 auto_scale_lr = dict(enable=False, base_batch_size=8)
 
-# train_dataloader = dict(
-#     dataset=dict(
-#         ann_file='val/val.json',
-#         data_prefix=dict(img='val/image'),
-#     )
-# )
+train_dataloader = dict(
+    dataset=dict(
+        ann_file='val/val.json',
+        data_prefix=dict(img='val/image'),
+    )
+)
