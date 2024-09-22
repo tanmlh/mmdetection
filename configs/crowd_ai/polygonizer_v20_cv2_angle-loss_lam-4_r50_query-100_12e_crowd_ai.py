@@ -188,7 +188,7 @@ model = dict(
             activate=False,
             reduction='mean',
             naive_dice=False,
-            loss_weight=0),
+            loss_weight=10),
         loss_poly_reg=dict(
             type='SmoothL1Loss',
             reduction='mean',
@@ -203,11 +203,6 @@ model = dict(
             type='MSELoss',
             reduction='mean',
             loss_weight=5.
-        ),
-        loss_poly_dp=dict(
-            type='SmoothL1Loss',
-            reduction='mean',
-            loss_weight=0.01
         ),
         loss_poly_ang=dict(
             type='SmoothL1Loss',
@@ -266,7 +261,6 @@ val_evaluator = [
     dict(
         type='CocoMetric',
         ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        # ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
         metric=['segm'],
         mask_type='polygon',
         backend_args={{_base_.backend_args}},
@@ -297,7 +291,7 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=6
+max_epochs=12
 param_scheduler = [
     # dict(
     #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
@@ -307,7 +301,7 @@ param_scheduler = [
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[4],
+        milestones=[9],
         gamma=0.1)
 ]
 
@@ -321,7 +315,7 @@ default_hooks = dict(
         type='CheckpointHook',
         by_epoch=True,
         save_last=True,
-        max_keep_ckpts=10,
+        max_keep_ckpts=4,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
     visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=50)
@@ -333,7 +327,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'polygonizer_v20_gpu-2_cv2_no-dice_angle-loss_lam-4_r50_query-100_6e_crowd_ai',
+            name = 'polygonizer_v20_cv2_angle-loss_lam-4_r50_query-100_12e_crowd_ai',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
@@ -345,12 +339,11 @@ visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
 
-auto_scale_lr = dict(enable=True, base_batch_size=16 * 2)
+auto_scale_lr = dict(enable=False, base_batch_size=8)
 
 # train_dataloader = dict(
 #     dataset=dict(
-#         ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-#         data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
+#         ann_file='val/val.json',
+#         data_prefix=dict(img='val/image'),
 #     )
 # )
-find_unused_parameters=True

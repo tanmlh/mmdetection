@@ -157,8 +157,8 @@ class DPPolygonizeHead(nn.Module):
         opt_dis_comp = torch.gather(dp[is_complete], 2, sizes[is_complete].unsqueeze(1).unsqueeze(1).repeat(1,N,1)).min(dim=1)[0]
         opt_dis_incomp = torch.gather(dp[~is_complete, 0], 1, sizes[~is_complete].unsqueeze(1)-1)
         opt_dis = torch.cat([opt_dis_comp, opt_dis_incomp])
-        # avg_factor = 
-        losses['loss_dp'] = self.loss_poly_dp(opt_dis, torch.zeros_like(opt_dis))
+        avg_factor = reduce_mean(opt_dis.new_tensor(len(opt_dis)))
+        losses['loss_dp'] = self.loss_poly_dp(opt_dis, torch.zeros_like(opt_dis), avg_factor=avg_factor)
         # losses['loss_dp'] = (opt_dis_comp.sum() + opt_dis_incomp.sum()) / K * self.poly_cfg.get('loss_weight_dp', 0.01)
 
         if self.poly_cfg.get('apply_poly_iou_loss', False):
@@ -228,12 +228,16 @@ class DPPolygonizeHead(nn.Module):
         A = prim_reg_pred.reshape(-1, 2)
         B = prim_reg_targets.view(-1, 2)
 
+
         if self.poly_cfg.get('reg_targets_type', 'vertice') == 'contour':
             mask = (poly_pred >= 0).all(dim=-1).view(-1)
-            loss_poly_reg = self.loss_poly_reg(A[mask], B[mask])
+            avg_factor = reduce_mean(A.new_tensor(mask.sum().item() * 2))
+            loss_poly_reg = self.loss_poly_reg(A[mask], B[mask], avg_factor=avg_factor)
+
         elif self.poly_cfg.get('reg_targets_type', 'vertice') == 'vertice':
             mask = (prim_reg_targets >= 0).all(dim=-1).view(-1)
-            loss_poly_reg = self.loss_poly_reg(A[mask], B[mask])
+            avg_factor = reduce_mean(A.new_tensor(mask.sum().item() * 2))
+            loss_poly_reg = self.loss_poly_reg(A[mask], B[mask], avg_factor=avg_factor)
         else:
             raise ValueError()
 
@@ -305,7 +309,10 @@ class DPPolygonizeHead(nn.Module):
                     diffs.append(max_diff)
 
             if len(diffs) > 0:
-                loss_ang = torch.stack(diffs).mean() * self.loss_poly_ang.loss_weight
+                diffs = torch.stack(diffs)
+                avg_factor = reduce_mean(diffs.new_tensor(len(diffs)))
+                loss_ang = self.loss_poly_ang(diffs, torch.zeros_like(diffs), avg_factor=avg_factor)
+                # loss_ang = torch.stack(diffs).mean() * self.loss_poly_ang.loss_weight
 
             losses['loss_poly_ang'] = loss_ang
 
