@@ -100,7 +100,7 @@ val_dataloader = dict(
     )
 )
 test_dataloader = dict(
-    batch_size=8,
+    batch_size=1,
     num_workers=4,
     # persistent_workers=True,
     persistent_workers=False,
@@ -114,12 +114,12 @@ test_dataloader = dict(
         # data_prefix=dict(img='val/image'),
         # ann_file='val/val.json',
 
-        data_prefix=dict(img='test1/image'),
-        ann_file='test1/test-small.json',
+        # data_prefix=dict(img='test1/image'),
+        # ann_file='test1/test-small.json',
         # ann_file='test1/test.json',
-        # data_prefix=dict(img='test2/image'),
+        data_prefix=dict(img='test2/image'),
         # ann_file='test2/test-small.json',
-        # ann_file='test2/test.json',
+        ann_file='test2/test.json',
         # data_prefix=dict(img='test2/image'),
         test_mode=True,
         # coco_ann_path = '../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
