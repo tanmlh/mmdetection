@@ -266,7 +266,7 @@ val_evaluator = [
     dict(
         type='CocoMetric',
         ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        # ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+        # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
         metric=['segm'],
         mask_type='polygon',
         backend_args={{_base_.backend_args}},
@@ -340,7 +340,7 @@ vis_backends = [
         ),
     )
 ]
-# vis_backends = [dict(type='LocalVisBackend')]
+vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )

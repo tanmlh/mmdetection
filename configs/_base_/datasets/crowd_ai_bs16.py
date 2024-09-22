@@ -104,8 +104,8 @@ val_dataloader = dict(
     )
 )
 test_dataloader = dict(
-    batch_size=4,
-    num_workers=2,
+    batch_size=8,
+    num_workers=4,
     # persistent_workers=True,
     persistent_workers=False,
     drop_last=False,
@@ -116,8 +116,8 @@ test_dataloader = dict(
         pipeline=test_pipeline,
         backend_args=backend_args,
 
-        # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
+        ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+        # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
         data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
         test_mode=True,
         # datapipe=datapipe,

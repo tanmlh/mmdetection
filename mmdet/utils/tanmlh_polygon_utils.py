@@ -3465,6 +3465,7 @@ def sample_segments_from_json(polygons, seg_len=50, stride=25, array_type='torch
         for j, ring in enumerate(rings):
             sampled_ring = interpolate_ring(array_fun(ring), type=array_type, **kwargs)[:-1]
             ring_parts = separate_ring(sampled_ring, crop_len=seg_len, stride=stride)
+            ring_parts = np.stack(ring_parts, axis=0)
 
             idx1 = np.array([i] * len(ring_parts))
             idx2 = np.array([j] * len(ring_parts))

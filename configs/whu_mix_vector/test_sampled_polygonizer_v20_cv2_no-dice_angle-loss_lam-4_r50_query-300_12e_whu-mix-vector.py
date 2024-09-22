@@ -70,7 +70,7 @@ model = dict(
             num_cls_channels=2,
             stride_size=64,
             use_ind_offset=True,
-            poly_decode_type='dp',
+            poly_decode_type='sampled',
             reg_targets_type='vertice',
             return_poly_json=False,
             use_gt_jsons=False,
@@ -260,8 +260,8 @@ model = dict(
 val_evaluator = [
     dict(
         type='CocoMetric',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
-        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
+        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
         metric=['segm'],
         mask_type='polygon',
         backend_args={{_base_.backend_args}},
@@ -319,7 +319,7 @@ default_hooks = dict(
         max_keep_ckpts=10,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
 )
 
 vis_backends = [
@@ -328,7 +328,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'test_polygonizer_v20_cv2_no-dice_angle-loss_lam-4_r50_query-300_12e_whu-mix-vector',
+            name = 'test_sampled_polygonizer_v20_cv2_no-dice_angle-loss_lam-4_r50_query-300_12e_whu-mix-vector',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True

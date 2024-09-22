@@ -100,8 +100,8 @@ val_dataloader = dict(
     )
 )
 test_dataloader = dict(
-    batch_size=1,
-    num_workers=1,
+    batch_size=8,
+    num_workers=4,
     # persistent_workers=True,
     persistent_workers=False,
     drop_last=False,
