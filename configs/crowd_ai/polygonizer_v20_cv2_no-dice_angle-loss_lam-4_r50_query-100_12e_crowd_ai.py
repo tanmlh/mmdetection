@@ -345,7 +345,8 @@ visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
 
-auto_scale_lr = dict(enable=True, base_batch_size=16 * 2)
+# auto_scale_lr = dict(enable=True, base_batch_size=16 * 2)
+auto_scale_lr = dict(enable=False, base_batch_size=16 * 2)
 
 # train_dataloader = dict(
 #     dataset=dict(

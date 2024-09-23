@@ -260,7 +260,8 @@ model = dict(
 val_evaluator = [
     dict(
         type='CocoMetric',
-        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
         metric=['segm'],
         mask_type='polygon',
@@ -346,5 +347,13 @@ train_dataloader = dict(
     dataset=dict(
         ann_file='val/val.json',
         data_prefix=dict(img='val/image'),
+    )
+)
+test_dataloader = dict(
+    dataset=dict(
+        # data_prefix=dict(img='test1/image'),
+        # ann_file='test1/test.json',
+        data_prefix=dict(img='test2/image'),
+        ann_file='test2/test-small.json',
     )
 )

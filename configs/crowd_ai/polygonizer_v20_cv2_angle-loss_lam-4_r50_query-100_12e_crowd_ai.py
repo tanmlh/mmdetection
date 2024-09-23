@@ -204,6 +204,11 @@ model = dict(
             reduction='mean',
             loss_weight=5.
         ),
+        loss_poly_dp=dict(
+            type='SmoothL1Loss',
+            reduction='mean',
+            loss_weight=0.01
+        ),
         loss_poly_ang=dict(
             type='SmoothL1Loss',
             reduction='mean',
@@ -261,6 +266,7 @@ val_evaluator = [
     dict(
         type='CocoMetric',
         ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+        # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
         metric=['segm'],
         mask_type='polygon',
         backend_args={{_base_.backend_args}},
@@ -318,7 +324,7 @@ default_hooks = dict(
         max_keep_ckpts=4,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=50)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5000)
 )
 
 vis_backends = [
@@ -327,7 +333,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'polygonizer_v20_cv2_angle-loss_lam-4_r50_query-100_12e_crowd_ai',
+            name = 'polygonizer_v20_cv2_no-dice_angle-loss_lam-4_r50_query-100_12e_crowd_ai',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
@@ -339,11 +345,13 @@ visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
 
-auto_scale_lr = dict(enable=False, base_batch_size=8)
+# auto_scale_lr = dict(enable=True, base_batch_size=16 * 2)
+auto_scale_lr = dict(enable=False, base_batch_size=16 * 2)
 
 # train_dataloader = dict(
 #     dataset=dict(
-#         ann_file='val/val.json',
-#         data_prefix=dict(img='val/image'),
+#         ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+#         data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
 #     )
 # )
+find_unused_parameters=True

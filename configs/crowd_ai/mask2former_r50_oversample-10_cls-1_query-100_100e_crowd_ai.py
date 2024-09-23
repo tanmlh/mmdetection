@@ -150,8 +150,8 @@ val_evaluator = [
     #     backend_args={{_base_.backend_args}}),
     dict(
         type='CocoMetric',
-        # ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
+        ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+        # ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
         metric=['segm'],
         backend_args={{_base_.backend_args}})
 ]
@@ -204,7 +204,7 @@ default_hooks = dict(
         max_keep_ckpts=15,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True)
 )
 
 vis_backends = [

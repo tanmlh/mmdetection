@@ -261,9 +261,9 @@ val_evaluator = [
     dict(
         type='CocoMetric',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
+        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
-        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
         metric=['segm'],
         mask_type='polygon',
         backend_args={{_base_.backend_args}},

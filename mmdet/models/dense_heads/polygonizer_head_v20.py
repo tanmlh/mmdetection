@@ -1181,6 +1181,22 @@ class PolygonizerHeadV20(MaskFormerHead):
                         simp_rings, poly2ring_idxes
                     )
 
+                elif self.poly_cfg.get('poly_decode_type', 'dp') == 'reg-douglas-peucker':
+                    simp_rings = []
+                    for ring in rings:
+                        cur_ring = shapely.geometry.Polygon(ring)
+                        cur_ring = torch.tensor(cur_ring.simplify(
+                            tolerance=self.poly_cfg.get('douglas_tolerance', 1.5)
+                        ).exterior.coords)
+                        if len(cur_ring) >= 3:
+                            simp_rings.append(cur_ring)
+                        else:
+                            simp_rings.append(rings)
+
+                    simp_polygons = polygon_utils.assemble_rings(
+                        simp_rings, poly2ring_idxes
+                    )
+
                 elif self.poly_cfg.get('poly_decode_type', 'dp') == 'none':
                     simp_polygons = []
                     for i, poly_json in enumerate(poly_pred_jsons):
@@ -1207,8 +1223,8 @@ class PolygonizerHeadV20(MaskFormerHead):
 
 
             else:
-                batch_mask_preds.append(mask_pred[:,:0])
-                batch_cls_preds.append(cls_pred[:,:0])
+                batch_mask_preds.append(mask_pred[0,:0])
+                batch_cls_preds.append(cls_pred[0,:0])
                 batch_simp_polygons.append([])
 
             assert len(batch_simp_polygons) == B

@@ -71,6 +71,7 @@ model = dict(
             use_ind_offset=True,
             poly_decode_type='cls',
             # poly_decode_type='douglas-peucker',
+            # poly_decode_type='reg-douglas-peucker',
             # poly_decode_type='none',
             reg_targets_type='vertice',
             return_poly_json=False,
@@ -270,9 +271,9 @@ val_evaluator = [
         type='CocoMetric',
         # ann_file=data_root + 'annotations/instances_val2017.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/val/val.json',
-        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
+        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
         metric=['segm'],
         mask_type='polygon',
@@ -358,5 +359,13 @@ train_dataloader = dict(
     dataset=dict(
         ann_file='val/val.json',
         data_prefix=dict(img='val/image'),
+    )
+)
+test_dataloader = dict(
+    dataset=dict(
+        # data_prefix=dict(img='test1/image'),
+        # ann_file='test1/test.json',
+        data_prefix=dict(img='test2/image'),
+        ann_file='test2/test-small.json',
     )
 )
