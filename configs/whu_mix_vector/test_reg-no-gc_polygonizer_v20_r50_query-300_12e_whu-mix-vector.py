@@ -21,6 +21,7 @@ num_classes = num_things_classes + num_stuff_classes
 model = dict(
     type='PolyFormerV2',
     data_preprocessor=data_preprocessor,
+    # test_mode='slide_inference',
     frozen_parameters=[
         'backbone',
         'panoptic_head.pixel_decoder',
@@ -69,9 +70,8 @@ model = dict(
             num_cls_channels=2,
             stride_size=64,
             use_ind_offset=True,
-            poly_decode_type='cls',
-            # poly_decode_type='douglas-peucker',
-            # poly_decode_type='none',
+            # poly_decode_type='dp',
+            poly_decode_type='reg_sampled',
             reg_targets_type='vertice',
             return_poly_json=False,
             use_gt_jsons=False,
@@ -82,15 +82,15 @@ model = dict(
             align_iou_thre=0.5,
             num_min_bins=32,
             proj_gt=False,
-            loss_weight_dp=0.0,
+            loss_weight_dp=0.01,
             max_match_dis=10,
             use_ref_rings=False,
             apply_poly_iou_loss=True,
             sample_points=True,
-            polygonize_mode='aggregate_mask',
             max_step_size=128,
-            apply_cls=True,
-            douglas_tolerance=2.
+            polygonize_mode='cv2_single_mask',
+            apply_right_angle_loss=False,
+            apply_angle_loss=True
         ),
         pixel_decoder=dict(
             type='MSDeformAttnPixelDecoder',
@@ -195,12 +195,6 @@ model = dict(
             reduction='mean',
             loss_weight=1.
         ),
-        loss_poly_cls=dict(
-            type='CrossEntropyLoss',
-            use_sigmoid=False,
-            loss_weight=2.0,
-            reduction='mean',
-        ),
         loss_poly_vec=dict(
             type='SmoothL1Loss',
             reduction='mean',
@@ -211,10 +205,20 @@ model = dict(
             reduction='mean',
             loss_weight=5.
         ),
+        loss_poly_dp=dict(
+            type='SmoothL1Loss',
+            reduction='mean',
+            loss_weight=0.
+        ),
         loss_poly_ang=dict(
             type='SmoothL1Loss',
             reduction='mean',
             loss_weight=1.
+        ),
+        loss_poly_right_ang = dict(
+            type='SmoothL1Loss',
+            reduction='mean',
+            loss_weight=0.
         )),
     panoptic_fusion_head=dict(
         type='PolyFormerFusionHeadV2',
@@ -255,24 +259,16 @@ model = dict(
         # In Mask2Former's panoptic postprocessing,
         # it will filter mask area where score is less than 0.5 .
         # filter_low_score=True
-        filter_low_score=False
+        filter_low_score=False,
     ),
     init_cfg=None)
 
 val_evaluator = [
-    # dict(
-    #     type='CocoPanopticMetric',
-    #     ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
-    #     # ann_file=data_root + 'annotations/panoptic_val2017.json',
-    #     seg_prefix=data_root + 'annotations/panoptic_val2017/',
-    #     backend_args={{_base_.backend_args}}),
     dict(
         type='CocoMetric',
-        # ann_file=data_root + 'annotations/instances_val2017.json',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/val/val.json',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
-        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
         metric=['segm'],
         mask_type='polygon',
@@ -306,15 +302,15 @@ optim_wrapper = dict(
 
 max_epochs=12
 param_scheduler = [
-    dict(
-        type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
-        end=1000),
+    # dict(
+    #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
+    #     end=1000),
     dict(
         type='MultiStepLR',
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[10],
+        milestones=[9],
         gamma=0.1)
 ]
 
@@ -328,7 +324,7 @@ default_hooks = dict(
         type='CheckpointHook',
         by_epoch=True,
         save_last=True,
-        max_keep_ckpts=12,
+        max_keep_ckpts=5,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
     visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
@@ -340,7 +336,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'test_cls_polygonizer_v20_cls_no-clamp_mask-targets_sample-points_v2_align-iou-05_lam-4_r50_query-300_12e_whu-mix-vector',
+            name = 'polygonizer_v20_cv2_no-gc_no-dice_angle-loss_lam-4_r50_query-300_12e_whu-mix-vector',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
@@ -354,17 +350,18 @@ visualizer = dict(
 
 auto_scale_lr = dict(enable=False, base_batch_size=8)
 
-train_dataloader = dict(
-    dataset=dict(
-        ann_file='val/val.json',
-        data_prefix=dict(img='val/image'),
-    )
-)
+# train_dataloader = dict(
+#     dataset=dict(
+#         ann_file='val/val.json',
+#         data_prefix=dict(img='val/image'),
+#     )
+# )
 test_dataloader = dict(
     dataset=dict(
-        # data_prefix=dict(img='test1/image'),
+        data_prefix=dict(img='test1/image'),
         # ann_file='test1/test.json',
-        data_prefix=dict(img='test2/image'),
-        ann_file='test2/test-small.json',
+        ann_file='test1/test-small.json',
+        # data_prefix=dict(img='test2/image'),
+        # ann_file='test2/test-small.json',
     )
 )
