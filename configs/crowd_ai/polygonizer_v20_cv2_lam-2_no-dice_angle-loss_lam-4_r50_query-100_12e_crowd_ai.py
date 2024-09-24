@@ -207,7 +207,7 @@ model = dict(
         loss_poly_dp=dict(
             type='SmoothL1Loss',
             reduction='mean',
-            loss_weight=0.005
+            loss_weight=0.01
         ),
         loss_poly_ang=dict(
             type='SmoothL1Loss',
