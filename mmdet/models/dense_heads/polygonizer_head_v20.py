@@ -1080,6 +1080,9 @@ class PolygonizerHeadV20(MaskFormerHead):
             )
             sampled_segs = sampled_segs.astype(np.float32)
 
+            t2 = time.time()
+            t3 = t2
+
             if len(sampled_segs) > 0:
                 query_idx = topk_mask.view(-1).nonzero().view(-1)[poly2mask_idxes[segs2poly_idxes[:,0]]]
                 query_feat = query_feat_list[-1].view(B*Q, -1)[query_idx]
@@ -1091,6 +1094,8 @@ class PolygonizerHeadV20(MaskFormerHead):
                 dp_pred_results = self.dp_polygonize_head(
                     poly_pred, W * 4, mask_feat=mask_features, query_feat=query_feat, batch_idxes=batch_idxes
                 )
+                t3 = time.time()
+
 
                 prim_reg_pred = dp_pred_results['prim_reg_pred'] * scale2
 
@@ -1111,10 +1116,13 @@ class PolygonizerHeadV20(MaskFormerHead):
                 pred_results['pred_rings'] = rings
                 pred_results['sampled_rings'] = others['sampled_rings']
 
+
                 for i in range(B):
                     cur_mask = poly2mask_idxes[poly2mask_idxes // max_per_image == i]
                     batch_mask_preds.append(mask_pred.view(-1, H, W)[cur_mask])
                     batch_cls_preds.append(cls_pred.view(-1, 2)[cur_mask])
+
+                t4 = time.time()
 
 
                 if self.poly_cfg.get('poly_decode_type', 'dp') == 'dp':
@@ -1236,6 +1244,31 @@ class PolygonizerHeadV20(MaskFormerHead):
             pred_results['poly_pred_results'] = batch_simp_polygons
             pred_results['mask_pred_results'] = batch_mask_preds
             pred_results['mask_cls_results'] = batch_cls_preds
+            t5 = time.time()
+
+            if calculate_time:
+                if not hasattr(self, 'time_dict'):
+                    self.time_dict = {}
+                    self.time_dict['mask'] = []
+                    self.time_dict['mask2poly'] = []
+                    self.time_dict['poly_refine'] = []
+                    self.time_dict['poly_simp'] = []
+                    self.time_dict['num_masks'] = []
+                    self.time_cnt = 0
+
+                self.time_dict['mask'].append(t1 - t0)
+                self.time_dict['mask2poly'].append(t2-t1+t4-t3)
+                self.time_dict['poly_refine'].append(t4-t3)
+                self.time_dict['poly_simp'].append(t5-t4)
+                self.time_dict['num_masks'] += [len(x) for x in batch_simp_polygons]
+
+                self.time_cnt += 1
+
+            print(f'{t1-t0} {t2-t1+t4-t3} {t4-t3} {t5-t4}')
+
+        if calculate_time and self.time_cnt == 50:
+            for key, value in self.time_dict.items():
+                print(f'{key} {np.array(value).mean()}')
 
         return pred_results
 

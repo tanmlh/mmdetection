@@ -170,6 +170,7 @@ class PolyFormerFusionHeadV2(MaskFormerFusionHead):
             if instance_on:
                 ins_results = self.instance_postprocess(
                     mask_cls_result, mask_pred_result, poly_pred_result)
+
                 result['ins_results'] = ins_results
 
             if semantic_on:
@@ -196,7 +197,6 @@ class PolyFormerFusionHeadV2(MaskFormerFusionHead):
                 ins_results.masks[:,0,0] = 1
                 ins_results.segmentations = segmentations
                 result['ins_results'] = ins_results
-
 
             results.append(result)
 

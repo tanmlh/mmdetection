@@ -14,7 +14,8 @@ data_preprocessor = dict(
     # batch_augments=batch_augments
 )
 
-load_from='work_dirs/mask2former_r50_query-300_50e_crowd_ai/epoch_50.pth'
+# load_from='work_dirs/mask2former_r50_query-300_50e_crowd_ai/epoch_50.pth'
+load_from='work_dirs/mask2former_r50_crowd_ai_100e.pth'
 num_things_classes = 1
 num_stuff_classes = 0
 num_classes = num_things_classes + num_stuff_classes
@@ -51,7 +52,7 @@ model = dict(
         out_channels=256,
         num_things_classes=num_things_classes,
         num_stuff_classes=num_stuff_classes,
-        num_queries=300,
+        num_queries=100,
         num_transformer_feat_level=3,
         poly_cfg=dict(
             num_inter_points=64,
@@ -69,15 +70,12 @@ model = dict(
             num_cls_channels=2,
             stride_size=64,
             use_ind_offset=True,
-            poly_decode_type='ffl_json',
-            # gt_json_path="/home/Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json",
-            gt_json_path="/home/Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json",
-            # polyworld_json_path='../PolyWorldPretrainedNetwork/predictions.json',
-            ffl_json_path='./work_dirs/ffl_crowd_ai.json',
+            poly_decode_type='dp',
+            # poly_decode_type='douglas-peucker',
             reg_targets_type='vertice',
             return_poly_json=False,
             use_gt_jsons=False,
-            mask_cls_thre=0.0,
+            mask_cls_thre=0.5,
             lam=4,
             map_features=True,
             max_align_dis=15,
@@ -89,10 +87,10 @@ model = dict(
             use_ref_rings=False,
             apply_poly_iou_loss=True,
             sample_points=True,
-            max_sample_offsets=10,
-            num_samples=1024,
-            max_step_size=128,
-            polygonize_mode='aggregate_mask',
+            max_step_size=64,
+            polygonize_mode='cv2_single_mask',
+            apply_right_angle_loss=False,
+            apply_angle_loss=True
         ),
         pixel_decoder=dict(
             type='MSDeformAttnPixelDecoder',
@@ -191,7 +189,7 @@ model = dict(
             activate=False,
             reduction='mean',
             naive_dice=False,
-            loss_weight=10.),
+            loss_weight=0),
         loss_poly_reg=dict(
             type='SmoothL1Loss',
             reduction='mean',
@@ -207,10 +205,20 @@ model = dict(
             reduction='mean',
             loss_weight=5.
         ),
+        loss_poly_dp=dict(
+            type='SmoothL1Loss',
+            reduction='mean',
+            loss_weight=0.01
+        ),
         loss_poly_ang=dict(
             type='SmoothL1Loss',
             reduction='mean',
             loss_weight=1.
+        ),
+        loss_poly_right_ang = dict(
+            type='SmoothL1Loss',
+            reduction='mean',
+            loss_weight=0.
         )),
     panoptic_fusion_head=dict(
         type='PolyFormerFusionHeadV2',
@@ -247,28 +255,20 @@ model = dict(
         instance_on=True,
         # max_per_image is for instance segmentation.
         max_per_image=100,
-        iou_thr=0.5,
+        iou_thr=0.8,
         # In Mask2Former's panoptic postprocessing,
         # it will filter mask area where score is less than 0.5 .
         # filter_low_score=True
-        filter_low_score=False
+        filter_low_score=False,
+        calculate_time=True
     ),
     init_cfg=None)
 
 val_evaluator = [
-    # dict(
-    #     type='CocoPanopticMetric',
-    #     ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
-    #     # ann_file=data_root + 'annotations/panoptic_val2017.json',
-    #     seg_prefix=data_root + 'annotations/panoptic_val2017/',
-    #     backend_args={{_base_.backend_args}}),
     dict(
         type='CocoMetric',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/val/val.json',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
         ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        # ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
+        # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
         metric=['segm'],
         mask_type='polygon',
         backend_args={{_base_.backend_args}},
@@ -299,17 +299,17 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=3
+max_epochs=12
 param_scheduler = [
-    dict(
-        type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
-        end=1000),
+    # dict(
+    #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
+    #     end=1000),
     dict(
         type='MultiStepLR',
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[2],
+        milestones=[9],
         gamma=0.1)
 ]
 
@@ -323,10 +323,10 @@ default_hooks = dict(
         type='CheckpointHook',
         by_epoch=True,
         save_last=True,
-        max_keep_ckpts=2,
+        max_keep_ckpts=4,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5000)
 )
 
 vis_backends = [
@@ -335,7 +335,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'polygonizer_v20_no-clamp_mask-targets_sample_points_v2_align-iou-05_lam-4_r50_query-300_3e_crowd_ai',
+            name = 'polygonizer_v20_cv2_no-dice_angle-loss_lam-4_r50_query-100_12e_crowd_ai',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
@@ -347,13 +347,21 @@ visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
 
-auto_scale_lr = dict(enable=False, base_batch_size=8)
+# auto_scale_lr = dict(enable=True, base_batch_size=16 * 2)
+auto_scale_lr = dict(enable=False, base_batch_size=16 * 2)
 
 train_dataloader = dict(
     dataset=dict(
-        # ann_file='val/val.json',
         ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        # data_prefix=dict(img='val/image'),
         data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
     )
 )
+test_dataloader = dict(
+    batch_size=32,
+    num_workers=8,
+    dataset=dict(
+        ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+        data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
+    )
+)
+find_unused_parameters=True
