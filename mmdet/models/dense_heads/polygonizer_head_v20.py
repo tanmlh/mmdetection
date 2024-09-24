@@ -877,8 +877,12 @@ class PolygonizerHeadV20(MaskFormerHead):
             # cls_pred = torch.zeros(len(simp_polygons), *cls_pred.shape[1:], device=cls_pred.device)
             # cls_pred[:,0] = 1e4
 
-            mask_pred = torch.ones(len(simp_polygons), H, W, device=mask_pred.device)
-            cls_pred = torch.zeros(len(simp_polygons), 2, device=cls_pred.device)
+            img_id = batch_data_samples[0].img_id
+            H = self.coco.loadImgs(img_id)[0]['height']
+            W = self.coco.loadImgs(img_id)[0]['width']
+
+            mask_pred = torch.ones(len(simp_polygons), H, W, device=x[0].device)
+            cls_pred = torch.zeros(len(simp_polygons), 2, device=x[0].device)
             cls_pred[:,0] = 1e4
 
             pred_results = {}
