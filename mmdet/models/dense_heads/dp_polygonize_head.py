@@ -135,7 +135,7 @@ class DPPolygonizeHead(nn.Module):
         sizes = (prim_reg_pred >= 0).all(dim=-1).sum(dim=1)
 
         # decoded_rings = polygon_utils.batch_decode_ring_dp(prim_reg_pred, sizes, max_step_size=64, lam=4, device=prim_reg_pred.device)
-        if self.poly_cfg.get('apply_poly_iou_loss', False):
+        if self.poly_cfg.get('apply_poly_iou_loss', False) or self.poly_cfg.get('apply_poly_dis_loss', False):
             # prim_reg_pred = torch.cat([prim_reg_pred, prim_reg_pred[:, :1]], dim=1)
             if K > 0:
                 dp, dp_points = polygon_utils.batch_decode_ring_dp(
@@ -218,7 +218,6 @@ class DPPolygonizeHead(nn.Module):
                 # ((torch.cat(gt_wn_list) > 0.5) == gt_wns[:,0]).sum()
                 loss_poly_iou = self.loss_dice_wn(wns, point_targets)
                 # loss_poly_iou = self.loss_dice_wn(wns, gt_wns)
-                # pdb.set_trace()
                 # loss_poly_iou = (wns - gt_wns).abs().mean()
                 losses['loss_poly_iou'] = loss_poly_iou
             else:
@@ -269,21 +268,11 @@ class DPPolygonizeHead(nn.Module):
                     target_angle = torch.tensor([torch.pi / 2, torch.pi], device=angle.device).unsqueeze(0)
 
                     diff = (angle.unsqueeze(1) - target_angle).abs().min(dim=1)[0]
-                    # cur_loss = self.loss_poly_right_ang(diff, torch.zeros_like(diff))
-                    # loss_right_ang = self.loss_poly_right_ang(diff, torch.zeros_like(diff))
-                    # loss_right_ang.backward()
-                    # cur_loss.backward()
-                    # if v.grad.isnan().any():
-                    #     pdb.set_trace()
                     diffs.append(diff)
 
             if len(diffs) > 0:
                 diffs = torch.cat(diffs)
                 loss_right_ang = self.loss_poly_right_ang(diffs, torch.zeros_like(diffs))
-
-            #     loss_right_ang.backward()
-            #     if vs[0].grad.isnan().any():
-            #         pdb.set_trace()
 
             losses['loss_poly_right_ang'] = loss_right_ang
 
@@ -316,6 +305,47 @@ class DPPolygonizeHead(nn.Module):
                 loss_ang = diffs.mean() * self.loss_poly_ang.loss_weight
 
             losses['loss_poly_ang'] = loss_ang
+
+        if self.poly_cfg.get('apply_poly_dis_loss', False):
+            if len(match_idxes) > 0:
+
+                loss_poly_dis = prim_reg_pred[:0].sum()
+                pred_sampled = []
+                gt_sampled = []
+
+                for i, idx in enumerate(match_idxes):
+                    pred_ring = dp_points[idx]
+                    gt_ring = torch.tensor(gt_jsons[idx]['coordinates'][0], device=pred_ring.device)[:-1]
+
+                    interval = self.poly_cfg.get('step_size', 4)
+                    segment_lengths = torch.sqrt(((pred_ring - torch.roll(pred_ring, shifts=[-1], dims=[0]))**2).sum(dim=1))
+                    perimeter = segment_lengths.sum().item()
+                    num_bins = round(perimeter / interval)
+
+                    A = polygon_utils.interpolate_ring(
+                        pred_ring, num_bins=num_bins,
+                        num_min_bins=self.poly_cfg.get('num_min_bins', 16),
+                        drop_last=False
+                    )
+                    B = polygon_utils.interpolate_ring(
+                        gt_ring, num_bins=num_bins,
+                        num_min_bins=self.poly_cfg.get('num_min_bins', 16),
+                        drop_last=False
+                    )
+                    B_align = polygon_utils.align_rings_by_roll(A, B, True)
+                    pred_sampled.append(A)
+                    gt_sampled.append(B_align)
+
+                pred_sampled = torch.cat(pred_sampled)
+                gt_sampled = torch.cat(gt_sampled)
+                loss_poly_dis = self.loss_poly_reg(pred_sampled, gt_sampled)
+                # loss_poly_iou = self.loss_dice_wn(wns, gt_wns)
+                # pdb.set_trace()
+                # loss_poly_iou = (wns - gt_wns).abs().mean()
+                losses['loss_poly_dis'] = loss_poly_dis
+            else:
+                losses['loss_poly_dis'] = prim_reg_pred[:0].sum()
+
 
         return losses
 

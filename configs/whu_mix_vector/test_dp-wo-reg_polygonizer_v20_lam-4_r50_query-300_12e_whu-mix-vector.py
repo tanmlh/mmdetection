@@ -86,6 +86,7 @@ model = dict(
             apply_poly_iou_loss=True,
             sample_points=True,
             # polygonize_mode='aggregate_mask',
+            polygonize_mode='per_mask',
             max_step_size=128
         ),
         pixel_decoder=dict(
@@ -260,8 +261,8 @@ val_evaluator = [
         type='CocoMetric',
         # ann_file=data_root + 'annotations/instances_val2017.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/val/val.json',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
-        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
+        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
         metric=['segm'],
@@ -321,8 +322,7 @@ default_hooks = dict(
         max_keep_ckpts=12,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=2000000)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
 )
 
 vis_backends = [
@@ -349,5 +349,16 @@ train_dataloader = dict(
     dataset=dict(
         ann_file='val/val.json',
         data_prefix=dict(img='val/image'),
+    )
+)
+test_dataloader = dict(
+    batch_size=1,
+    dataset=dict(
+        data_prefix=dict(img='test1/image'),
+        # ann_file='test1/test.json',
+        ann_file='test1/test-small.json',
+        # data_prefix=dict(img='test2/image'),
+        # ann_file='test2/test-small.json',
+        # ann_file='test2/test.json',
     )
 )

@@ -578,6 +578,9 @@ class PolygonizerHeadV20(MaskFormerHead):
         if 'loss_poly_iou' in losses:
             loss_dict['loss_poly_iou'] = losses['loss_poly_iou'][-1]
 
+        if 'loss_poly_dis' in losses:
+            loss_dict['loss_poly_dis'] = losses['loss_poly_dis'][-1]
+
 
         # loss from other decoder layers
         """
@@ -1082,6 +1085,7 @@ class PolygonizerHeadV20(MaskFormerHead):
 
             t2 = time.time()
             t3 = t2
+            t4 = t3
 
             if len(sampled_segs) > 0:
                 query_idx = topk_mask.view(-1).nonzero().view(-1)[poly2mask_idxes[segs2poly_idxes[:,0]]]
@@ -1264,7 +1268,7 @@ class PolygonizerHeadV20(MaskFormerHead):
 
                 self.time_cnt += 1
 
-            print(f'{t1-t0} {t2-t1+t4-t3} {t4-t3} {t5-t4}')
+                print(f'{t1-t0} {t2-t1+t4-t3} {t4-t3} {t5-t4}')
 
         if calculate_time and self.time_cnt == 50:
             for key, value in self.time_dict.items():

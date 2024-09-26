@@ -2606,10 +2606,11 @@ def interpolate_ring(linear_ring, drop_last=True, interval=None, num_bins=None, 
                 num_bins = min(num_bins, pad_length)
             num_bins = min(num_bins, num_max_bins)
 
-        ts = torch.linspace(0, 1, num_bins)
+        ts = torch.linspace(0, 1, num_bins, device=linear_ring.device)
         ts = torch.fmod(ts, 1)
 
-        cumulative_lengths = torch.cat([torch.zeros(1), torch.cumsum(segment_lengths, dim=0)]) / perimeter
+        cumulative_lengths = torch.cat([torch.zeros(1, device=linear_ring.device), torch.cumsum(segment_lengths, dim=0)]) / perimeter
+
 
         segment_indices = torch.searchsorted(cumulative_lengths, ts, side='right') - 1
         # segment_indices = fast_searchsorted(cumulative_lengths, ts) - 1
@@ -4059,6 +4060,7 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
                         coordinates=all_coords
                     )
                 )
+        idxes = torch.tensor(idxes, dtype=torch.long)
         return polygons, idxes
 
     elif mode == 'aggregate_mask':
@@ -4095,7 +4097,6 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
                 idxes.append(int(value))
 
         idxes = torch.tensor(idxes, dtype=torch.long)
-
         return polygons, idxes
 
     elif mode == 'simple_mask':

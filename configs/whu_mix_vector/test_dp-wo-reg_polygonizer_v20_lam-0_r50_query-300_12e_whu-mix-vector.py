@@ -74,7 +74,7 @@ model = dict(
             return_poly_json=False,
             use_gt_jsons=False,
             mask_cls_thre=0.0,
-            lam=8,
+            lam=0,
             map_features=True,
             max_align_dis=15,
             align_iou_thre=0.5,
@@ -85,7 +85,6 @@ model = dict(
             use_ref_rings=False,
             apply_poly_iou_loss=True,
             sample_points=True,
-            # polygonize_mode='aggregate_mask',
             polygonize_mode='per_mask',
             max_step_size=128
         ),
@@ -246,7 +245,8 @@ model = dict(
         # In Mask2Former's panoptic postprocessing,
         # it will filter mask area where score is less than 0.5 .
         # filter_low_score=True
-        filter_low_score=False
+        filter_low_score=False,
+        calculate_time=False
     ),
     init_cfg=None)
 
@@ -261,8 +261,8 @@ val_evaluator = [
         type='CocoMetric',
         # ann_file=data_root + 'annotations/instances_val2017.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/val/val.json',
-        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
         metric=['segm'],
@@ -322,7 +322,7 @@ default_hooks = dict(
         max_keep_ckpts=12,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
 )
 
 vis_backends = [
@@ -355,8 +355,8 @@ test_dataloader = dict(
     batch_size=1,
     dataset=dict(
         data_prefix=dict(img='test1/image'),
-        # ann_file='test1/test.json',
-        ann_file='test1/test-small.json',
+        ann_file='test1/test.json',
+        # ann_file='test1/test-small.json',
         # data_prefix=dict(img='test2/image'),
         # ann_file='test2/test-small.json',
         # ann_file='test2/test.json',

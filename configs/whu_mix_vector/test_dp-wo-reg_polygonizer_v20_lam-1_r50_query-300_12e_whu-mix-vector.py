@@ -85,7 +85,7 @@ model = dict(
             use_ref_rings=False,
             apply_poly_iou_loss=True,
             sample_points=True,
-            polygonize_mode='aggregate_mask',
+            polygonize_mode='per_mask',
             max_step_size=128
         ),
         pixel_decoder=dict(
@@ -245,7 +245,8 @@ model = dict(
         # In Mask2Former's panoptic postprocessing,
         # it will filter mask area where score is less than 0.5 .
         # filter_low_score=True
-        filter_low_score=False
+        filter_low_score=False,
+        calculate_time=False
     ),
     init_cfg=None)
 
@@ -348,5 +349,16 @@ train_dataloader = dict(
     dataset=dict(
         ann_file='val/val.json',
         data_prefix=dict(img='val/image'),
+    )
+)
+test_dataloader = dict(
+    batch_size=1,
+    dataset=dict(
+        data_prefix=dict(img='test1/image'),
+        # ann_file='test1/test.json',
+        ann_file='test1/test-small.json',
+        # data_prefix=dict(img='test2/image'),
+        # ann_file='test2/test-small.json',
+        # ann_file='test2/test.json',
     )
 )
