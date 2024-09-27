@@ -282,7 +282,6 @@ class CocoMetric(BaseMetric):
         result_files['proposal'] = f'{outfile_prefix}.bbox.json'
         dump(bbox_json_results, result_files['bbox'])
 
-        pdb.set_trace()
         if segm_json_results is not None:
             result_files['segm'] = f'{outfile_prefix}.segm.json'
             dump(segm_json_results, result_files['segm'])
