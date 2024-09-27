@@ -70,26 +70,26 @@ model = dict(
             num_cls_channels=2,
             stride_size=64,
             use_ind_offset=True,
-            poly_decode_type='dp',
+            poly_decode_type='gt_mask',
             reg_targets_type='vertice',
             return_poly_json=False,
             use_gt_jsons=False,
             mask_cls_thre=0.0,
-            lam=2,
+            lam=0.5,
             map_features=True,
             max_align_dis=15,
             align_iou_thre=0.5,
-            num_min_bins=32,
+            num_min_bins=64,
             proj_gt=False,
             loss_weight_dp=0.01,
             max_match_dis=10,
             use_ref_rings=False,
             apply_poly_iou_loss=True,
             sample_points=True,
-            max_step_size=32,
+            max_step_size=256,
             polygonize_mode='cv2_single_mask',
             apply_right_angle_loss=False,
-            apply_angle_loss=True
+            apply_angle_loss=True,
         ),
         pixel_decoder=dict(
             type='MSDeformAttnPixelDecoder',
@@ -325,7 +325,7 @@ default_hooks = dict(
         max_keep_ckpts=4,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
 )
 
 vis_backends = [
@@ -334,14 +334,14 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'test_max-gcp_polygonizer_v20_cv2_no-dice_angle-loss_lam-4_r50_query-100_12e_crowd_ai',
+            name = 'test_gt_polygonizer_v20_cv2_no-dice_angle-loss_lam-4_r50_query-100_12e_crowd_ai',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
-# vis_backends = [dict(type='LocalVisBackend')]
+vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
@@ -353,14 +353,17 @@ train_dataloader = dict(
     dataset=dict(
         ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
         data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
+        coco_res_path='work_dirs/gt_gcp_crowd_ai/gt_gcp_lam-4_interval-1.json'
     )
 )
 test_dataloader = dict(
     batch_size=1,
     dataset=dict(
         # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
+        # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+        # data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
+        ann_file='8e089a94-555c-4d7b-8f2f-4d733aebb058_train/train/annotation.json',
+        data_prefix=dict(img='8e089a94-555c-4d7b-8f2f-4d733aebb058_train/train/images'),
     )
 )
 find_unused_parameters=True

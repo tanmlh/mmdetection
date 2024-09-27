@@ -1022,18 +1022,69 @@ class PolygonMasks(BaseInstanceMasks):
         ndarray_masks = self.to_ndarray()
         return torch.tensor(ndarray_masks, dtype=dtype, device=device)
 
-    def to_json(self, scale=1.):
+    def to_json(self, scale=1., fix_crowd_ai=False):
         import shapely
 
         poly_jsons = []
         for poly_per_obj in self.masks:
             cropped_poly_per_obj = []
-            coords = [(x.reshape(-1,2) * scale).tolist() for x in poly_per_obj]
-            poly_json = dict(
-                type='Polygon',
-                coordinates=coords
-            )
-            poly_jsons.append(poly_json)
+
+            if not fix_crowd_ai:
+                coords = [(x.reshape(-1,2) * scale).tolist() for x in poly_per_obj]
+                poly_json = dict(
+                    type='Polygon',
+                    coordinates=coords
+                )
+                poly_jsons.append(poly_json)
+
+            else:
+
+                coords = [(x.reshape(-1,2) * scale) for x in poly_per_obj]
+
+                new_coords = []
+                for coord in coords:
+                    # if not (coord[0] == coord[-1]).all():
+                    #     pdb.set_trace()
+                    redundant_mask = np.zeros(len(coord), dtype=bool)
+                    redundant_mask[1:] = (coord[:-1] == coord[1:]).all(axis=-1)
+                    new_coords.append(coord[~redundant_mask])
+
+                coords = new_coords
+
+                new_coords = []
+                start_idx = 0
+                for coord in coords:
+                    for i in range(len(coord)-1):
+                        if start_idx == -1:
+                            start_idx = i+1
+                            continue
+
+                        if (coord[i+1] == coord[start_idx]).all():
+                            start_idx = -1
+
+                # if len(new_coords) != len(coords):
+                #     pdb.set_trace()
+
+                """
+                for coord in new_coords:
+                    poly_json = dict(
+                        type='Polygon',
+                        coordinates=[coord.tolist()]
+                    )
+                    poly_jsons.append(poly_json)
+                """
+                if len(new_coords) == 0:
+                    pdb.set_trace()
+
+                for coord in new_coords:
+                    if  not (coord[0] == coord[-1]).all():
+                        pdb.set_trace()
+
+                poly_json = dict(
+                    type='Polygon',
+                    coordinates=[coord.tolist() for coord in new_coords]
+                )
+                poly_jsons.append(poly_json)
 
         return poly_jsons
 

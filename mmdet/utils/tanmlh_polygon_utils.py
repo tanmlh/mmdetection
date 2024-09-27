@@ -3616,6 +3616,7 @@ def cal_pairwise_dis(points, sizes, device='cpu', eps=1e-8, max_step_size=20, re
     dot_x12 = (x1 * x2).sum(dim=-1)
     V3_dis = torch.norm((x2 - dot_x12.unsqueeze(-1) / ((torch.norm(x1, dim=-1).unsqueeze(-1) ** 2) + eps) * x1), dim=-1)
     cost = (V3_dis * V3_mask).sum(dim=-1)
+    # cost = (V3_dis * V3_mask).max(dim=-1)[0]
 
     new_cost = torch.ones(B, N, N, device=device) * 1e8
     inf_mask = torch.zeros(B, N, dtype=torch.bool, device=device)
@@ -3823,7 +3824,7 @@ def simplify_rings_dp(rings, max_step_size=50, lam=5, device=None, ref_rings=Non
         return new_all_rings
 
 # def sample_rings_from_json(polygons, interval=2, num_max_lens=512, num_min_lens=8, array_type='torch', only_exterior=False):
-def sample_rings_from_json(polygons, array_type='torch', only_exterior=False, **kwargs):
+def sample_rings_from_json(polygons, sample_type='interpolate', array_type='torch', only_exterior=False, **kwargs):
     """
     polygons: List of json dicts of polygons
     interval: sampling distance in each ring of the polygons
@@ -3849,11 +3850,15 @@ def sample_rings_from_json(polygons, array_type='torch', only_exterior=False, **
 
         for j, ring in enumerate(rings):
             ring = array_fun(ring)
-            if (ring > 0).sum() > 0:
-                sampled_ring = interpolate_ring(
-                    ring, type=array_type, drop_last=False, **kwargs
-                )
-            else:
+            if sample_type == 'interpolate':
+                if (ring > 0).sum() > 0:
+                    sampled_ring = interpolate_ring(
+                        ring, type=array_type, drop_last=False, **kwargs
+                    )
+                else:
+                    sampled_ring = ring
+
+            elif sample_type == 'none':
                 sampled_ring = ring
 
             sampled_rings.append(sampled_ring)
@@ -3870,9 +3875,12 @@ def sample_rings_from_json(polygons, array_type='torch', only_exterior=False, **
 
 
 def simplify_poly_jsons(poly_jsons, lam=4, max_step_size=80, device='cpu', scale=1.,
-                        return_format='coco', **kwargs):
+                        return_format='coco', sample_type='interpolate', **kwargs):
 
-    all_rings, ring_sizes, poly2ring_idxes = sample_rings_from_json(poly_jsons, **kwargs)
+    if len(poly_jsons) == 0:
+        return []
+
+    all_rings, ring_sizes, poly2ring_idxes = sample_rings_from_json(poly_jsons, sample_type=sample_type, **kwargs)
 
     all_rings = [x.to(device) * scale for x in all_rings]
 
@@ -4218,5 +4226,20 @@ def vis_data_wandb(data):
             pdb.set_trace()
 
 
+
+def add_middle_points(ring):
+    N = ring.shape
+    new_ring = []
+    closed = (ring[0] == ring[-1]).all()
+    if not closed:
+        pdb.set_trace()
+
+    for i in range(len(ring) - 1):
+        new_ring.append(ring[i])
+        new_ring.append((ring[i] + ring[i+1]) / 2)
+    new_ring.append(ring[-1])
+    new_ring = torch.stack(new_ring)
+
+    return ring
 
 

@@ -89,7 +89,8 @@ class DPPolygonizeHead(nn.Module):
         sampled_rings, _, _ = polygon_utils.sample_rings_from_json(
             pred_jsons, interval=self.poly_cfg.get('step_size'), only_exterior=True,
             num_min_bins=self.poly_cfg.get('num_min_bins', 8),
-            num_bins=self.poly_cfg.get('num_bins', None)
+            num_bins=self.poly_cfg.get('num_bins', None),
+            sample_type=self.poly_cfg.get('sample_type', 'interpolate')
         )
         sampled_segments, is_complete = polygon_utils.sample_segments_from_rings(sampled_rings, self.poly_cfg.get('num_inter_points'))
 
@@ -437,6 +438,8 @@ class DPPolygonizeHead(nn.Module):
         K = (sampled_segments >= 0).all(dim=-1).sum()
 
         poly_gt_torch = torch.tensor(poly_gt_json['coordinates'][0]).float() # use the exterior
+        if self.poly_cfg.get('add_gt_middle', False):
+            poly_gt_torch = polygon_utils.add_middle_points(poly_gt_torch)
 
         if K == 0 or (poly_gt_torch == 0).all():
             targets['prim_cls_targets'] = prim_cls_targets

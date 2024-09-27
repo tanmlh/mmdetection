@@ -270,7 +270,10 @@ class PolygonizerHeadV20(MaskFormerHead):
         # scale = batch_img_metas[0]['img_shape'][0] / batch_img_metas[0]['ori_shape'][0]
         scale=1.
         gt_poly_jsons_list = [
-            gt_instances['masks'].to_json(scale=scale) for gt_instances in batch_gt_instances
+            gt_instances['masks'].to_json(
+                scale=scale,
+                fix_crowd_ai=self.poly_cfg.get('fix_crowd_ai', False)
+            ) for gt_instances in batch_gt_instances
         ]
         gt_semantic_segs = [
             None if gt_semantic_seg is None else gt_semantic_seg.sem_seg
@@ -926,6 +929,30 @@ class PolygonizerHeadV20(MaskFormerHead):
             pred_results['mask_cls_results'] = [cls_pred]
             return pred_results
 
+        elif self.poly_cfg.get('poly_decode_type', 'dp') == 'gt_mask':
+            assert len(batch_data_samples) == 1
+            gt_masks = torch.tensor(batch_data_samples[0].gt_instances.masks.to_ndarray()).to(torch.uint8)
+            # gt_masks = batch_data_samples[0].gt_instances.masks.to_ndarray().astype(int)
+            _, H, W = gt_masks.shape
+            gt_jsons = polygon_utils.polygonize_mask(gt_masks, scale=1, mode='per_mask')[0]
+
+            simp_polygons = polygon_utils.simplify_poly_jsons(
+                gt_jsons, lam=self.poly_cfg.get('lam', 4), device=x[0].device,
+                max_step_size=self.poly_cfg.get('max_step_size', 128),
+                num_min_bins=64, interval=1, sample_type='none'
+            )
+
+            mask_pred = torch.ones(len(simp_polygons), H, W, device=x[0].device)
+            cls_pred = torch.zeros(len(simp_polygons), 2, device=x[0].device)
+            cls_pred[:,0] = 1e4
+
+            pred_results = {}
+            pred_results['poly_pred_results'] = [simp_polygons]
+            pred_results['mask_pred_results'] = [mask_pred]
+            pred_results['mask_cls_results'] = [cls_pred]
+
+            return pred_results
+
 
 
         batch_size = x[0].shape[0]
@@ -1136,7 +1163,7 @@ class PolygonizerHeadV20(MaskFormerHead):
                     simp_rings = polygon_utils.simplify_rings_dp(
                         rings, lam=self.poly_cfg.get('lam', 4), device=x[0].device,
                         ref_rings=sampled_rings if self.poly_cfg.get('use_ref_rings', False) else None,
-                        drop_last=False
+                        drop_last=False, max_step_size=self.poly_cfg.get('max_step_size', 50)
                     )
                     simp_rings = [x[:-1] for x in simp_rings]
 

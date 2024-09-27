@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/datasets/crowd_ai_bs16.py', '../_base_/default_runtime.py',
+    '../_base_/datasets/whu_mix_vector.py', '../_base_/default_runtime.py',
 ]
 data_preprocessor = dict(
     type='DetDataPreprocessor',
@@ -14,14 +14,14 @@ data_preprocessor = dict(
     # batch_augments=batch_augments
 )
 
-# load_from='work_dirs/mask2former_r50_query-300_50e_crowd_ai/epoch_50.pth'
-load_from='work_dirs/mask2former_r50_crowd_ai_100e.pth'
+load_from='work_dirs/mask2former_r50_query-300_50e_whu-mix-vector/epoch_50.pth'
 num_things_classes = 1
 num_stuff_classes = 0
 num_classes = num_things_classes + num_stuff_classes
 model = dict(
     type='PolyFormerV2',
     data_preprocessor=data_preprocessor,
+    # test_mode='slide_inference',
     frozen_parameters=[
         'backbone',
         'panoptic_head.pixel_decoder',
@@ -52,14 +52,14 @@ model = dict(
         out_channels=256,
         num_things_classes=num_things_classes,
         num_stuff_classes=num_stuff_classes,
-        num_queries=100,
+        num_queries=300,
         num_transformer_feat_level=3,
         poly_cfg=dict(
             num_inter_points=64,
             num_primitive_queries=64,
             apply_prim_pred=True,
-            step_size=4,
-            polygonized_scale=4.,
+            step_size=2,
+            polygonized_scale=1.,
             max_offsets=5,
             use_coords_in_poly_feat=True,
             use_decoded_feat_in_poly_feat=True,
@@ -75,7 +75,7 @@ model = dict(
             return_poly_json=False,
             use_gt_jsons=False,
             mask_cls_thre=0.0,
-            lam=2,
+            lam=4,
             map_features=True,
             max_align_dis=15,
             align_iou_thre=0.5,
@@ -84,9 +84,9 @@ model = dict(
             loss_weight_dp=0.01,
             max_match_dis=10,
             use_ref_rings=False,
-            apply_poly_iou_loss=True,
+            apply_poly_iou_loss=False,
             sample_points=True,
-            max_step_size=32,
+            max_step_size=128,
             polygonize_mode='cv2_single_mask',
             apply_right_angle_loss=False,
             apply_angle_loss=True
@@ -204,11 +204,6 @@ model = dict(
             reduction='mean',
             loss_weight=5.
         ),
-        loss_poly_dp=dict(
-            type='SmoothL1Loss',
-            reduction='mean',
-            loss_weight=0.01
-        ),
         loss_poly_ang=dict(
             type='SmoothL1Loss',
             reduction='mean',
@@ -253,7 +248,7 @@ model = dict(
         semantic_on=False,
         instance_on=True,
         # max_per_image is for instance segmentation.
-        max_per_image=100,
+        max_per_image=200,
         iou_thr=0.8,
         # In Mask2Former's panoptic postprocessing,
         # it will filter mask area where score is less than 0.5 .
@@ -265,9 +260,10 @@ model = dict(
 val_evaluator = [
     dict(
         type='CocoMetric',
-        ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        # ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
-        # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
+        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
         metric=['segm'],
         mask_type='polygon',
         backend_args={{_base_.backend_args}},
@@ -322,10 +318,10 @@ default_hooks = dict(
         type='CheckpointHook',
         by_epoch=True,
         save_last=True,
-        max_keep_ckpts=4,
+        max_keep_ckpts=10,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1000)
 )
 
 vis_backends = [
@@ -334,7 +330,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'test_max-gcp_polygonizer_v20_cv2_no-dice_angle-loss_lam-4_r50_query-100_12e_crowd_ai',
+            name = 'polygonizer_v20_cv2_scale-1_step-size-2_no-dice_angle-loss_lam-4_r50_query-300_12e_whu-mix-vector',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
@@ -346,21 +342,22 @@ visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
 
-# auto_scale_lr = dict(enable=True, base_batch_size=16 * 2)
-auto_scale_lr = dict(enable=False, base_batch_size=16 * 2)
+auto_scale_lr = dict(enable=False, base_batch_size=8)
 
-train_dataloader = dict(
-    dataset=dict(
-        ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
-    )
-)
+# train_dataloader = dict(
+#     dataset=dict(
+#         ann_file='val/val.json',
+#         data_prefix=dict(img='val/image'),
+#     )
+# )
 test_dataloader = dict(
     batch_size=1,
     dataset=dict(
-        # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
+        data_prefix=dict(img='test1/image'),
+        # ann_file='test1/test.json',
+        ann_file='test1/test-small.json',
+        # data_prefix=dict(img='test2/image'),
+        # ann_file='test2/test-small.json',
+        # ann_file='test2/test.json',
     )
 )
-find_unused_parameters=True

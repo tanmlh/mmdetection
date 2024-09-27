@@ -75,7 +75,7 @@ model = dict(
             return_poly_json=False,
             use_gt_jsons=False,
             mask_cls_thre=0.0,
-            lam=4,
+            lam=4.0,
             map_features=True,
             max_align_dis=15,
             align_iou_thre=0.5,
@@ -86,7 +86,7 @@ model = dict(
             use_ref_rings=False,
             apply_poly_iou_loss=True,
             sample_points=True,
-            max_step_size=128,
+            max_step_size=64,
             polygonize_mode='cv2_single_mask',
             apply_right_angle_loss=False,
             apply_angle_loss=True
@@ -260,8 +260,8 @@ model = dict(
 val_evaluator = [
     dict(
         type='CocoMetric',
-        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
-        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
+        ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test-small.json',
+        # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test1/test.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test-small.json',
         # ann_file='../../Datasets/Dataset4EO/WHU-Mix/test2/test.json',
@@ -322,7 +322,7 @@ default_hooks = dict(
         max_keep_ckpts=10,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
 )
 
 vis_backends = [
@@ -331,7 +331,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'test_gcp_polygonizer_v20_cv2_no-dice_angle-loss_lam-4_r50_query-300_12e_whu-mix-vector',
+            name = 'test_max_gcp_polygonizer_v20_cv2_no-dice_angle-loss_lam-4_r50_query-300_12e_whu-mix-vector',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
@@ -353,9 +353,10 @@ train_dataloader = dict(
 )
 test_dataloader = dict(
     dataset=dict(
-        # data_prefix=dict(img='test1/image'),
+        data_prefix=dict(img='test1/image'),
         # ann_file='test1/test.json',
-        data_prefix=dict(img='test2/image'),
-        ann_file='test2/test-small.json',
+        ann_file='test1/test-small.json',
+        # data_prefix=dict(img='test2/image'),
+        # ann_file='test2/test-small.json',
     )
 )

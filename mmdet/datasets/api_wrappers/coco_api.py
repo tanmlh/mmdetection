@@ -44,6 +44,9 @@ class COCO(_COCO):
     def load_imgs(self, ids):
         return self.loadImgs(ids)
 
+    def load_res(self, file_path):
+        coco = super().load_res(file_path)
+
 
 # just for the ease of import
 COCOeval = _COCOeval

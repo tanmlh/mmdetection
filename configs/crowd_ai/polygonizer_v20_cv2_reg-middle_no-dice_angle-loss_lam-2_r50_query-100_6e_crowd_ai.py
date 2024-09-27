@@ -71,6 +71,7 @@ model = dict(
             stride_size=64,
             use_ind_offset=True,
             poly_decode_type='dp',
+            # poly_decode_type='none',
             reg_targets_type='vertice',
             return_poly_json=False,
             use_gt_jsons=False,
@@ -84,12 +85,14 @@ model = dict(
             loss_weight_dp=0.01,
             max_match_dis=10,
             use_ref_rings=False,
-            apply_poly_iou_loss=True,
+            apply_poly_iou_loss=False,
             sample_points=True,
-            max_step_size=32,
+            max_step_size=64,
             polygonize_mode='cv2_single_mask',
             apply_right_angle_loss=False,
-            apply_angle_loss=True
+            apply_angle_loss=True,
+            add_gt_middle=True,
+            fix_crowd_ai=False
         ),
         pixel_decoder=dict(
             type='MSDeformAttnPixelDecoder',
@@ -266,8 +269,7 @@ val_evaluator = [
     dict(
         type='CocoMetric',
         ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        # ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
-        # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation.json',
+        # ann_file='../../Datasets/Dataset4EO/CrowdAI/0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
         metric=['segm'],
         mask_type='polygon',
         backend_args={{_base_.backend_args}},
@@ -298,7 +300,7 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=12
+max_epochs=6
 param_scheduler = [
     # dict(
     #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
@@ -308,7 +310,7 @@ param_scheduler = [
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[9],
+        milestones=[4],
         gamma=0.1)
 ]
 
@@ -322,10 +324,10 @@ default_hooks = dict(
         type='CheckpointHook',
         by_epoch=True,
         save_last=True,
-        max_keep_ckpts=4,
+        max_keep_ckpts=10,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=50)
 )
 
 vis_backends = [
@@ -334,31 +336,32 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'test_max-gcp_polygonizer_v20_cv2_no-dice_angle-loss_lam-4_r50_query-100_12e_crowd_ai',
+            name = 'polygonizer_v20_cv2_reg-middle_no-dice_angle-loss_lam-2_r50_query-100_6e_crowd_ai',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
-# vis_backends = [dict(type='LocalVisBackend')]
+vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
 
-# auto_scale_lr = dict(enable=True, base_batch_size=16 * 2)
-auto_scale_lr = dict(enable=False, base_batch_size=16 * 2)
+auto_scale_lr = dict(enable=True, base_batch_size=16 * 2)
 
-train_dataloader = dict(
-    dataset=dict(
-        ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
-    )
-)
+# train_dataloader = dict(
+#     num_workers=8,
+#     dataset=dict(
+#         ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+#         data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
+#     )
+# )
+
 test_dataloader = dict(
     batch_size=1,
+    num_workers=8,
     dataset=dict(
-        # ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
         ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
         data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
     )
