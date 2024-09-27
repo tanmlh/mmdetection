@@ -3823,7 +3823,6 @@ def simplify_rings_dp(rings, max_step_size=50, lam=5, device=None, ref_rings=Non
     else:
         return new_all_rings
 
-# def sample_rings_from_json(polygons, interval=2, num_max_lens=512, num_min_lens=8, array_type='torch', only_exterior=False):
 def sample_rings_from_json(polygons, sample_type='interpolate', array_type='torch', only_exterior=False, **kwargs):
     """
     polygons: List of json dicts of polygons
@@ -3850,7 +3849,7 @@ def sample_rings_from_json(polygons, sample_type='interpolate', array_type='torc
 
         for j, ring in enumerate(rings):
             ring = array_fun(ring)
-            if sample_type == 'interpolate':
+            if sample_type == 'interpolate' or len(ring) >= 512:
                 if (ring > 0).sum() > 0:
                     sampled_ring = interpolate_ring(
                         ring, type=array_type, drop_last=False, **kwargs
@@ -3860,6 +3859,7 @@ def sample_rings_from_json(polygons, sample_type='interpolate', array_type='torc
 
             elif sample_type == 'none':
                 sampled_ring = ring
+
 
             sampled_rings.append(sampled_ring)
             cur_poly2ring_idxes.append(ring_cnt)
