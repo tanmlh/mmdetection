@@ -3633,7 +3633,7 @@ def cal_pairwise_dis(points, sizes, device='cpu', eps=1e-8, max_step_size=20, re
 def batchify(sizes, max_diff_ratio=1.5):
 
     sorted_idxes = np.argsort(np.array(sizes))
-    base_size = 512 * 512 * 4
+    base_size = 512 * 512 * 1
 
     batch_idx_list = []
     batch_size_list = []

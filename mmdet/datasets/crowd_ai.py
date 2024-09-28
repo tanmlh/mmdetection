@@ -49,11 +49,11 @@ class CrowdAIDataset(CocoDataset):
             self.coco = self.COCOAPI(local_path)
 
             if self.coco_res_path is not None:
-
                 submission_file = json.loads(open(self.coco_res_path).read())
                 # coco = COCO(gt_json_path)
                 coco = self.coco.loadRes(submission_file)
                 self.coco = coco
+                # pass
 
         # The order of returned `cat_ids` will not
         # change with the order of the `classes`
@@ -71,6 +71,11 @@ class CrowdAIDataset(CocoDataset):
 
             ann_ids = self.coco.getAnnIds([img_id])
             raw_ann_info = self.coco.loadAnns(ann_ids)
+
+            if self.coco_res_path is not None:
+                for x in raw_ann_info:
+                    x['segmentation'] = x['polygon']
+
             total_ann_ids.extend(ann_ids)
 
             parsed_data_info = self.parse_data_info({
