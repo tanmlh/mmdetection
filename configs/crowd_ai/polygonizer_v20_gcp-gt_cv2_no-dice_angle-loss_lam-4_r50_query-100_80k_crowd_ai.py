@@ -343,15 +343,15 @@ param_scheduler = [
 # test_cfg = dict(type='TestLoop')
 
 
-log_processor = dict(type='LogProcessor', window_size=50, by_epoch=True)
+log_processor = dict(type='LogProcessor', window_size=50, by_epoch=False)
 
 default_hooks = dict(
     checkpoint=dict(
         type='CheckpointHook',
-        by_epoch=True,
+        by_epoch=False,
         save_last=True,
         max_keep_ckpts=10,
-        interval=1),
+        interval=5000),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
     visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=50)
 )

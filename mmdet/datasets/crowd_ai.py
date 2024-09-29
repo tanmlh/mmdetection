@@ -93,4 +93,5 @@ class CrowdAIDataset(CocoDataset):
 
         del self.coco
 
+        data_list = [data_list[x] for x in [1416, 1426, 1682, 1379, 751]]
         return data_list

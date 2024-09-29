@@ -861,6 +861,9 @@ class PolygonizerHeadV20(MaskFormerHead):
         calculate_time = self.test_cfg.get('calculate_time', False)
         t0 = time.time()
 
+        if not hasattr(self, 'cnt'):
+            self.cnt = 0
+
         if self.poly_cfg.get('poly_decode_type', 'dp') == 'polyworld_json':
             from mmdet.datasets.api_wrappers import COCO, COCOeval, COCOevalMP, COCOevalBuilding
             gt_json_path = self.poly_cfg['gt_json_path']
