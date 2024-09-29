@@ -178,7 +178,7 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=50
+max_epochs=100
 param_scheduler = [
     # dict(
     #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
@@ -188,7 +188,7 @@ param_scheduler = [
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[40],
+        milestones=[80],
         gamma=0.1)
 ]
 
@@ -214,7 +214,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'mask2former_r50_320x320_oversample-3_cls-1_query-100_50e_crowd_ai',
+            name = 'mask2former_r50_320x320_oversample-3_cls-1_query-100_100e_crowd_ai',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
