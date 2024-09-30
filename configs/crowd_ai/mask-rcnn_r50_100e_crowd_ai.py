@@ -50,7 +50,7 @@ model = dict(
         type='StandardRoIHead',
         bbox_roi_extractor=dict(
             type='SingleRoIExtractor',
-            roi_layer=dict(type='RoIAlign', output_size=7, sampling_ratio=0),
+            roi_layer=dict(type='RoIAlign', output_size=16, sampling_ratio=0),
             out_channels=256,
             featmap_strides=[4, 8, 16, 32]),
         bbox_head=dict(
@@ -69,7 +69,7 @@ model = dict(
             loss_bbox=dict(type='L1Loss', loss_weight=1.0)),
         mask_roi_extractor=dict(
             type='SingleRoIExtractor',
-            roi_layer=dict(type='RoIAlign', output_size=14, sampling_ratio=0),
+            roi_layer=dict(type='RoIAlign', output_size=32, sampling_ratio=0),
             out_channels=256,
             featmap_strides=[4, 8, 16, 32]),
         mask_head=dict(
@@ -118,7 +118,7 @@ model = dict(
                 pos_fraction=0.25,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=True),
-            mask_size=28,
+            mask_size=32,
             pos_weight=-1,
             debug=False)),
     test_cfg=dict(
@@ -165,7 +165,7 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=50
+max_epochs=100
 param_scheduler = [
     # dict(
     #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
@@ -175,7 +175,7 @@ param_scheduler = [
         begin=0,
         end=max_epochs,
         by_epoch=True,
-        milestones=[40],
+        milestones=[80, 95],
         gamma=0.1)
 ]
 
@@ -189,10 +189,10 @@ default_hooks = dict(
         type='CheckpointHook',
         by_epoch=True,
         save_last=True,
-        max_keep_ckpts=1,
-        interval=1),
+        max_keep_ckpts=5,
+        interval=5),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    # visualization=dict(type='TanmlhVisualizationHook', draw=True)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=50)
 )
 
 vis_backends = [
@@ -201,14 +201,14 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection',
             entity = 'tum-tanmlh',
-            name = 'mask-rcnn_r50_query-100_50e_crowd_ai',
+            name = 'mask-rcnn_r50_query-100_100e_crowd_ai',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
-vis_backends = [dict(type='LocalVisBackend')]
+# vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )

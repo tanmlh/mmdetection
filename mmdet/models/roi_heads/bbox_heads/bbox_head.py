@@ -204,7 +204,7 @@ class BBoxHead(BaseModule):
         bbox_targets = pos_priors.new_zeros(num_samples, reg_dim)
         bbox_weights = pos_priors.new_zeros(num_samples, reg_dim)
 
-        pdb.set_trace()
+        # pdb.set_trace()
         if num_pos > 0:
             labels[:num_pos] = pos_gt_labels
             pos_weight = 1.0 if cfg.pos_weight <= 0 else cfg.pos_weight
