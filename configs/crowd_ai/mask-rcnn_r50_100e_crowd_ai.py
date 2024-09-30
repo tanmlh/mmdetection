@@ -69,7 +69,7 @@ model = dict(
             loss_bbox=dict(type='L1Loss', loss_weight=1.0)),
         mask_roi_extractor=dict(
             type='SingleRoIExtractor',
-            roi_layer=dict(type='RoIAlign', output_size=32, sampling_ratio=0),
+            roi_layer=dict(type='RoIAlign', output_size=24, sampling_ratio=0),
             out_channels=256,
             featmap_strides=[4, 8, 16, 32]),
         mask_head=dict(
@@ -118,7 +118,7 @@ model = dict(
                 pos_fraction=0.25,
                 neg_pos_ub=-1,
                 add_gt_as_proposals=True),
-            mask_size=64,
+            mask_size=48,
             pos_weight=-1,
             debug=False)),
     test_cfg=dict(
@@ -221,9 +221,9 @@ visualizer = dict(
 auto_scale_lr = dict(enable=True, base_batch_size=16)
 
 
-# train_dataloader = dict(
-#     dataset=dict(
-#         ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-#         data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
-#     )
-# )
+train_dataloader = dict(
+    dataset=dict(
+        ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+        data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
+    )
+)
