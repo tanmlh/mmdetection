@@ -143,9 +143,14 @@ class CrowdAIDataset(CocoDataset):
 
             x1, y1 = np.array(ann['segmentation'][0]).reshape(-1,2).min(axis=0)
             x2, y2 = np.array(ann['segmentation'][0]).reshape(-1,2).max(axis=0)
-            bbox = [x1, y1, x2, y2]
             w = x2 - x1
             h = y2 - y1
+            margin = 0.05
+            bbox = [
+                max(x1 - w * margin, 0), max(y1 - h * margin, 0),
+                min(x2 + w * margin, img_info['width']),
+                min(y2 + h * margin, img_info['height'])
+            ]
 
             inter_w = max(0, min(x2, img_info['width']) - max(x1, 0))
             inter_h = max(0, min(y2, img_info['height']) - max(y1, 0))
