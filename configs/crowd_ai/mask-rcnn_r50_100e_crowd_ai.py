@@ -221,9 +221,9 @@ visualizer = dict(
 auto_scale_lr = dict(enable=True, base_batch_size=16)
 
 
-train_dataloader = dict(
-    dataset=dict(
-        ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
-        data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
-    )
-)
+# train_dataloader = dict(
+#     dataset=dict(
+#         ann_file='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/annotation-small.json',
+#         data_prefix=dict(img='0a5c561f-e361-4e9b-a3e2-94f42a003a2b_val/val/images'),
+#     )
+# )
