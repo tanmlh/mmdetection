@@ -31,6 +31,8 @@ from .kd_one_stage import KnowledgeDistillationSingleStageDetector
 from .lad import LAD
 from .mask2former import Mask2Former
 from .mask_rcnn import MaskRCNN
+from .st_mask_rcnn import STMaskRCNN
+from .st_mask_rcnn_polygonizer import STMaskRCNNPolygonizer
 from .mask_scoring_rcnn import MaskScoringRCNN
 from .maskformer import MaskFormer
 from .nasfcos import NASFCOS
@@ -49,6 +51,7 @@ from .single_stage import SingleStageDetector
 from .soft_teacher import SoftTeacher
 from .solo import SOLO
 from .solov2 import SOLOv2
+from .st_solov2 import STSOLOv2
 from .sparse_rcnn import SparseRCNN
 from .tood import TOOD
 from .trident_faster_rcnn import TridentFasterRCNN
@@ -60,6 +63,8 @@ from .yolof import YOLOF
 from .yolox import YOLOX
 from .polyformer import PolyFormer
 from .polyformer_v2 import PolyFormerV2
+from .st_mask2former import STMask2Former
+from .st_mask2former_v2 import STMask2FormerV2
 
 __all__ = [
     'ATSS', 'BaseDetector', 'SingleStageDetector', 'TwoStageDetector', 'RPN',
@@ -73,5 +78,6 @@ __all__ = [
     'MaskFormer', 'DDOD', 'Mask2Former', 'SemiBaseDetector', 'SoftTeacher',
     'RTMDet', 'Detectron2Wrapper', 'CrowdDet', 'CondInst', 'BoxInst',
     'DetectionTransformer', 'ConditionalDETR', 'DINO', 'DABDETR', 'GLIP',
-    'DDQDETR', 'GroundingDINO', 'PolyFormer', 'PolyFormerV2'
+    'DDQDETR', 'GroundingDINO', 'PolyFormer', 'PolyFormerV2', 'STMaskRCNN',
+    'STMask2Former', 'STMask2FormerV2', 'STSOLOv2'
 ]

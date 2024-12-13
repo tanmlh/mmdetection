@@ -39,6 +39,56 @@ from scipy.optimize import linear_sum_assignment
 from skimage.measure import label as ski_label
 from skimage.measure import regionprops
 
+def compute_overlap_matrix(boxes1, boxes2, mode='numpy'):
+
+    if mode == 'numpy':
+        # Reshape boxes1 and boxes2 to enable broadcasting
+        # boxes1 shape: (N, 1, 4)
+        # boxes2 shape: (1, M, 4)
+        boxes1 = boxes1[:, np.newaxis, :]
+        boxes2 = boxes2[np.newaxis, :, :]
+
+        # Compute conditions for overlapping
+        # Overlap along x-axis
+        x_overlap = np.logical_not(
+            (boxes1[..., 2] < boxes2[..., 0]) | (boxes1[..., 0] > boxes2[..., 2])
+        )
+
+        # Overlap along y-axis
+        y_overlap = np.logical_not(
+            (boxes1[..., 3] < boxes2[..., 1]) | (boxes1[..., 1] > boxes2[..., 3])
+        )
+
+        # A matrix where True represents an overlap
+        overlap_matrix = np.logical_and(x_overlap, y_overlap)
+    elif mode == 'torch':
+        # Reshape boxes1 and boxes2 to enable broadcasting
+        # boxes1 shape: (N, 1, 4)
+        # boxes2 shape: (1, M, 4)
+        boxes1 = boxes1[:, None, :]
+        boxes2 = boxes2[None, :, :]
+
+        # Compute conditions for overlapping
+        # Overlap along x-axis
+        x_overlap = torch.logical_not(
+            (boxes1[..., 2] < boxes2[..., 0]) | (boxes1[..., 0] > boxes2[..., 2])
+        )
+
+        # Overlap along y-axis
+        y_overlap = torch.logical_not(
+            (boxes1[..., 3] < boxes2[..., 1]) | (boxes1[..., 1] > boxes2[..., 3])
+        )
+
+        # A matrix where True represents an overlap
+        overlap_matrix = torch.logical_and(x_overlap, y_overlap)
+
+    else:
+        raise ValueError()
+
+    return overlap_matrix
+
+
+
 
 def is_polygon_clockwise(polygon):
     rolled_polygon = np.roll(polygon, shift=1, axis=0)
@@ -292,8 +342,7 @@ def compute_patch(polygon, patch_size):
 
 def bounding_box_within_bounds(bounding_box, bounds):
     return bounds[0] <= bounding_box[0] and bounds[1] <= bounding_box[1] and bounding_box[2] <= bounds[2] and \
-           bounding_box[3] <= bounds[3]
-
+        bounding_box[3] <= bounds[3]
 
 def vertex_within_bounds(vertex, bounds):
     return bounds[0] <= vertex[0] <= bounds[2] and \
@@ -2415,6 +2464,9 @@ def calc_IoU(a, b):
     else:
         return iou
 
+def compute_sem_seg_IoU_cIoU(coco, coco_gti, score_thre=0.5):
+    pass
+
 def compute_IoU_cIoU(coco, coco_gti, score_thre=0.5):
 
     image_ids = coco.getImgIds(catIds=coco.getCatIds())
@@ -2487,6 +2539,81 @@ def compute_IoU_cIoU(coco, coco_gti, score_thre=0.5):
     # print("Mean IoU: ", np.mean(list_iou))
     # print("Mean C-IoU: ", np.mean(list_ciou))
     return list_iou, list_ciou, [N_total, N_GT_total]
+
+def compute_IoU_cIoU(coco, coco_gti, score_thre=0.5):
+
+    image_ids = coco.getImgIds(catIds=coco.getCatIds())
+    bar = tqdm(image_ids)
+
+    list_iou = []
+    list_ciou = []
+    N_total = 0
+    N_GT_total = 0
+    for image_id in bar:
+
+        img = coco.loadImgs(image_id)[0]
+
+        annotation_ids = coco.getAnnIds(imgIds=img['id'])
+        annotations_dt = coco.loadAnns(annotation_ids)
+        N = 0
+        is_first = True
+        mask = np.zeros((img['height'], img['width']), dtype=bool)
+        ann_cnt_dt = 0
+        for _idx, annotation in enumerate(annotations_dt):
+            if annotation['score'] > score_thre:
+                rle = cocomask.frPyObjects(annotation['polygon'], img['height'], img['width'])
+                m = cocomask.decode(rle)
+                # m = np.mod(m.sum(axis=-1), 2)
+                m = m.sum(axis=-1)
+
+                # if is_first:
+                #     mask = m.reshape((img['height'], img['width']))
+                #     N = len(annotation['polygon'][0]) // 2
+                #     is_first = False
+                # else:
+                mask = mask + m.reshape((img['height'], img['width']))
+                N = N + len(annotation['polygon'][0]) // 2
+                ann_cnt_dt += 1
+
+        mask = mask != 0
+        N_total += N
+
+        annotation_ids = coco_gti.getAnnIds(imgIds=img['id'])
+        annotations = coco_gti.loadAnns(annotation_ids)
+        N_GT = 0
+        ann_cnt_gt = 0
+
+        mask_gti = np.zeros((img['height'], img['width']), dtype=bool)
+        for _idx, annotation in enumerate(annotations):
+            rle = cocomask.frPyObjects(annotation['segmentation'], img['height'], img['width'])
+            m = cocomask.decode(rle)
+            # if _idx == 0:
+            #     mask_gti = m.reshape((img['height'], img['width']))
+            #     N_GT = len(annotation['segmentation'][0]) // 2
+            # else:
+            mask_gti = mask_gti + m.reshape((img['height'], img['width']))
+            N_GT = N_GT + len(annotation['segmentation'][0]) // 2
+            ann_cnt_gt += 1
+
+        mask_gti = mask_gti != 0
+        N_GT_total += N_GT
+
+        ps = 1 - np.abs(N - N_GT) / (N + N_GT + 1e-9)
+        iou = calc_IoU(mask, mask_gti)
+        list_iou.append(iou)
+        list_ciou.append(iou * ps)
+
+        # print(f'{N} {N_GT}')
+
+        bar.set_description("iou: %2.4f, c-iou: %2.4f" % (np.mean(list_iou), np.mean(list_ciou)))
+        bar.refresh()
+
+    # print("Done!")
+    # print("Mean IoU: ", np.mean(list_iou))
+    # print("Mean C-IoU: ", np.mean(list_ciou))
+    return list_iou, list_ciou, [N_total, N_GT_total]
+
+
 
 def compute_mta(coco_eval, score_thre=0.5):
     mtas = []
@@ -3376,7 +3503,16 @@ def decode_poly_jsons(poly_json, scale=1, step_size=8, device='cpu', results_for
         raise ValueError
 
 def poly_json2coco(poly_json, scale=1.):
-    coords_list = poly_json['coordinates']
+
+    if poly_json['type'] == 'Polygon':
+        coords_list = poly_json['coordinates']
+    elif poly_json['type'] == 'MultiPolygon':
+        coords_list = []
+        for polygon in poly_json['coordinates']:
+            for ring in polygon:
+                coords_list.append(ring)
+
+
     new_coords_list = []
     for coords in coords_list:
         new_coords = (torch.tensor(coords) * scale).view(-1).tolist()
@@ -3578,6 +3714,11 @@ def assemble_rings(rings, ring_idxes, format='coco'):
         polygons.append(cur_polygon)
 
     return polygons
+
+def assemble_polygons(poly_json, idxes):
+    for cur_idxes in range(idxes):
+        if len(cur_idxes):
+            pass
 
 
 def cal_pairwise_dis(points, sizes, device='cpu', eps=1e-8, max_step_size=20, ref_points=None):
@@ -4021,7 +4162,8 @@ def clip_by_bound(poly, im_h, im_w):
     p_y = np.clip(p_y, 0.0, im_h-1)
     return np.concatenate((p_x[:, np.newaxis], p_y[:, np.newaxis]), axis=1)
 
-def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='per_mask', scores=None):
+def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='per_mask',
+                    scores=None, return_idxes=False, return_multi_polygon=False):
 
     if mode == 'per_mask':
         N, H, W  = imgs.shape
@@ -4145,8 +4287,8 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
         # Set the bound before polygonization and use high-res mask
         arange_H = torch.arange(1, H+1, device=imgs.device).unsqueeze(0)
         arange_W = torch.arange(1, W+1, device=imgs.device).unsqueeze(0)
-        col_idx = (imgs.sum(dim=1) > 0) * arange_H
-        row_idx = (imgs.sum(dim=2) > 0) * arange_W
+        col_idx = (imgs.sum(dim=1) > 0) * arange_W
+        row_idx = (imgs.sum(dim=2) > 0) * arange_H
         x_max, y_max = col_idx.max(dim=1)[0] - 1, row_idx.max(dim=1)[0] - 1
         row_idx = torch.where(row_idx == 0, H+1, row_idx)
         col_idx = torch.where(col_idx == 0, W+1, col_idx)
@@ -4214,6 +4356,91 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
 
         return polygons, idxes
 
+    elif mode == 'concat_mask':
+        N, H, W = imgs.shape
+        imgs = imgs * torch.arange(1, N+1, device=imgs.device, dtype=torch.int16).view(N, 1, 1)
+        offsets = (torch.arange(N).unsqueeze(1) * torch.tensor([0, H]).view(1,2)).numpy()
+
+        imgs = imgs.view(-1, W).cpu().numpy()
+        mask = imgs > 0
+        cur_shapes = rasterio.features.shapes(imgs, mask=mask)
+
+        json_dict = {}
+        for shape, value in cur_shapes:
+            if shape['type'] == 'Polygon':
+                coords = shape['coordinates']
+            elif shape['type'] == 'MultiPolygon':
+                pdb.set_trace()
+                coords = shape['coordinates'][0]
+            else:
+                pdb.set_trace()
+                continue
+
+            scaled_coords = []
+            for x in coords:
+                x = (np.array(x) - offsets[int(value)-1]) * scale
+                if clockwise:
+                    x = x[::-1]
+                scaled_coords.append(x.tolist())
+
+            if not value in json_dict:
+                json_dict[value] = []
+
+            json_dict[value].append(dict(type='Polygon', coordinates=scaled_coords))
+
+        poly_jsons = []
+        poly2mask_idxes = []
+        mask2poly_idxes = []
+
+        cnt = 0
+        for i in range(1, N+1):
+            if i in json_dict:
+                if return_multi_polygon and len(json_dict[i]) > 1:
+                    coords_list = []
+                    for poly_json in json_dict[i]:
+                        coords_list.append(poly_json['coordinates'])
+                    multi_poly_json = dict(
+                        type='MultiPolygon',
+                        coordinates=coords_list
+                    )
+                    poly_jsons.append(multi_poly_json)
+                else:
+                    poly_jsons.append(json_dict[i][0])
+                # else:
+                #     poly_jsons.extend(json_dict[i])
+                #     poly2mask_idxes.extend([i - 1] * len(json_dict[i]))
+                #     mask2poly_idxes.append((torch.arange(len(json_dict[i])) + cnt).tolist())
+                #     cnt += len(json_dict[i])
+            else:
+                dummy_poly_json = dict(
+                    type='Polygon',
+                    coordinates=[[[0,0], [1,0], [1,1], [0,1], [0,0]]],
+                    ignore=True
+                )
+                poly_jsons.append(dummy_poly_json)
+
+                # if return_idxes:
+                #     mask2poly_idxes.append([cnt])
+                #     cnt += 1
+
+        if return_idxes:
+            return poly_jsons, poly2mask_idxes, mask2poly_idxes
+
+        return poly_jsons
+
+    elif mode == 'concat_mask_cv2':
+
+        N, H, W = imgs.shape
+        imgs = imgs * torch.arange(1, N+1, device=imgs.device, dtype=torch.int16).view(N, 1, 1)
+        offsets = (torch.arange(N).unsqueeze(1) * torch.tensor([0, H]).view(1,2)).numpy()
+
+        imgs = imgs.view(1, -1, W)
+        # mask = imgs > 0
+
+        return polygonize_mask(imgs, scale=scale, mode='cv2_single_mask')
+ 
+
+
 def vis_data_wandb(data):
     import matplotlib.pyplot as plt
     import wandb
@@ -4241,5 +4468,220 @@ def add_middle_points(ring):
     new_ring = torch.stack(new_ring)
 
     return ring
+
+def paste_poly_json(poly_jsons: list, boxes, h, w, H, W, skip_empty: bool = True) -> tuple:
+
+    """Paste polygons in json format according to boxes.
+
+    This implementation is modified from
+    https://github.com/facebookresearch/detectron2/
+    """
+
+    assert len(poly_jsons) == len(boxes)
+    N = len(poly_jsons)
+    w_scale = (boxes[:,2] - boxes[:,0]) / h
+    h_scale = (boxes[:,3] - boxes[:,1]) / w
+
+    scales = torch.stack([w_scale, h_scale], dim=1).numpy()
+    offsets = boxes[:,:2].numpy()
+
+    new_poly_jsons = []
+    for i, poly_json in enumerate(poly_jsons):
+        if poly_json['type'] == 'Polygon':
+            new_coords = []
+            for coords in poly_json['coordinates']:
+                new_coords.append((np.array(coords) * scales[i] + offsets[i]).tolist())
+
+            new_poly_json = dict(
+                type='Polygon',
+                coordinates=new_coords
+            )
+            new_poly_jsons.append(new_poly_json)
+        elif poly_json['type'] == 'MultiPolygon':
+            new_coords_list = []
+            for coords_list in poly_json['coordinates']:
+                new_coords = []
+                for coords in coords_list:
+                    new_coords.append((np.array(coords) * scales[i] + offsets[i]).tolist())
+                new_coords_list.append(new_coords)
+            new_poly_json = dict(
+                type='MultiPolygon',
+                coordinates=new_coords_list
+            )
+            new_poly_jsons.append(new_poly_json)
+        else:
+            pdb.set_trace()
+
+    return new_poly_jsons
+
+def transform_polygon(polygon, offsets=(0,0), scales=(1., 1.), mode='json'):
+    def transform_rings(rings, offsets, scales):
+        new_rings = []
+        for ring in rings:
+            temp = (np.array(ring) + offsets) * scales
+            new_rings.append(temp.tolist())
+
+        return new_rings
+
+    scales = np.array(scales).reshape(1, 2)
+    offsets = np.array(offsets).reshape(1,2)
+    if mode == 'json':
+        if polygon['type'] == 'Polygon':
+            new_rings = transform_rings(polygon['coordinates'], offsets, scales)
+            result_json = dict(
+                type='Polygon',
+                coordinates=new_rings
+            )
+
+        elif polygon['type'] == 'MultiPolygon':
+            rings_list = []
+            for rings in polygon['coordinates']:
+                new_rings = transform_rings(rings, offsets, scales)
+                rings_list.append(new_rings)
+
+            result_json = dict(
+                type='MultiPolygon',
+                coordinates=rings_list
+            )
+
+        return result_json
+
+    else:
+        pdb.set_trace()
+
+
+def unfold_poly_jsons(poly_jsons):
+    new_poly_jsons = []
+    geom2poly_idxes = []
+    poly2geom_idxes = []
+
+    cnt = 0
+    for i, poly_json in enumerate(poly_jsons):
+        if poly_json['type'] == 'Polygon':
+            new_poly_jsons.append(poly_json)
+            geom2poly_idxes.append([cnt])
+            poly2geom_idxes.append(i)
+            cnt += 1
+
+        elif poly_json['type'] == 'MultiPolygon':
+            rings_list = poly_json['coordinates']
+            for rings in rings_list:
+                cur_json = dict(
+                    type='Polygon',
+                    coordinates=rings
+                )
+                new_poly_jsons.append(cur_json)
+                poly2geom_idxes.append(i)
+
+
+            geom2poly_idxes.append((torch.arange(len(rings_list)) + cnt).tolist())
+            cnt += len(rings_list)
+
+    return new_poly_jsons, geom2poly_idxes, poly2geom_idxes
+
+def fold_poly_jsons(poly_jsons, geom2poly_idxes):
+    new_poly_jsons = []
+    for idxes in geom2poly_idxes:
+        cur_rings_list = [poly_jsons[idx]['coordinates'] for idx in idxes]
+        if len(idxes) > 1:
+            json_dict = dict(
+                type='MultiPolygon',
+                coordinates=cur_rings_list
+            )
+        else:
+            json_dict = dict(
+                type='Polygon',
+                coordinates=cur_rings_list[0]
+            )
+
+        new_poly_jsons.append(json_dict)
+
+    return new_poly_jsons
+
+def create_grid(x_min, y_min, x_max, y_max, h, w):
+    # Calculate the dimensions of the bounding box
+    W = x_max - x_min
+    H = y_max - y_min
+
+    # Determine the number of grids along each dimension
+    n_x = math.ceil(W / w)
+    n_y = math.ceil(H / h)
+
+    # Adjust the dimensions of each grid to fit perfectly
+    w_adj = W / n_x
+    h_adj = H / n_y
+
+    # Initialize an empty list to hold the grid coordinates
+    grids = []
+
+    # Generate the grid coordinates
+    for i in range(n_x):
+        for j in range(n_y):
+            x_min_i = x_min + i * w_adj
+            x_max_i = x_min + (i + 1) * w_adj
+            y_min_j = y_min + j * h_adj
+            y_max_j = y_min + (j + 1) * h_adj
+            grids.append((x_min_i, y_min_j, x_max_i, y_max_j))
+
+    return np.array(grids)
+
+def poly_overlaps(polys_A, polys_B, grid_size=(1024, 1024), iou_type='iou'):
+
+    def cal_iou(polygon1, polygon2, eps=1e-8):
+        intersection = polygon1.intersection(polygon2)
+        union = polygon1.union(polygon2)
+        iou = intersection.area / (union.area + eps)
+        return iou
+
+    def cal_half_iou(polygon1, polygon2, eps=1e-8):
+        intersection = polygon1.intersection(polygon2)
+        # union = polygon1.union(polygon2)
+        iou = intersection.area / (polygon1.area + eps)
+        return iou
+
+    if iou_type == 'iou':
+        iou_fun = cal_iou
+    elif iou_type == 'half_iou':
+        iou_fun = cal_half_iou
+
+    poly_shps_A = polys_A.get_shapely()
+    poly_shps_B = polys_B.get_shapely()
+    iou_mat = np.zeros((len(polys_A), len(polys_B)))
+
+    if len(polys_A) == 0 or len(polys_B) == 0:
+        return iou_mat
+
+    bounds_A = polys_A.get_bounds()
+    bounds_B = polys_B.get_bounds()
+    bounds_min = np.concatenate([bounds_A, bounds_B]).min(axis=0)[:2]
+    bounds_max = np.concatenate([bounds_A, bounds_B]).max(axis=0)[2:]
+    bounds = np.concatenate([bounds_min, bounds_max])
+
+    if grid_size is not None:
+        grids = create_grid(bounds[0], bounds[1], bounds[2], bounds[3], grid_size[0], grid_size[1])
+        grids = np.concatenate([bounds[:2], bounds[:2]]).reshape(1,-1) + grids
+    else:
+        grids = bounds[None]
+
+    overlap_mat_A = compute_overlap_matrix(grids, bounds_A)
+    overlap_mat_B = compute_overlap_matrix(grids, bounds_B)
+
+
+    result_idxes = []
+    A_idxes = []
+    B_idxes = []
+    for i in range(len(grids)):
+        cur_A_idxes = overlap_mat_A[i].nonzero()[0]
+        cur_B_idxes = overlap_mat_B[i].nonzero()[0]
+        cur_overlap_mat = compute_overlap_matrix(bounds_A[cur_A_idxes], bounds_B[cur_B_idxes])
+        if cur_overlap_mat.sum() == 0:
+            continue
+
+        row_idxes, col_idxes = cur_overlap_mat.nonzero()
+        for (row_id, col_id) in zip(row_idxes, col_idxes):
+            cur_iou = iou_fun(poly_shps_A[cur_A_idxes[row_id]], poly_shps_B[cur_B_idxes[col_id]])
+            iou_mat[cur_A_idxes[row_id], cur_B_idxes[col_id]] = cur_iou
+
+    return iou_mat
 
 

@@ -12,7 +12,7 @@ from .instaboost import InstaBoost
 from .loading import (FilterAnnotations, InferencerLoader, LoadAnnotations,
                       LoadEmptyAnnotations, LoadImageFromNDArray,
                       LoadMultiChannelImageFromFiles, LoadPanopticAnnotations,
-                      LoadProposals, LoadTrackAnnotations)
+                      LoadProposals, LoadTrackAnnotations, LoadTIFMetaInfo)
 from .text_transformers import LoadTextAnnotations, RandomSamplingNegPos
 from .transformers_glip import GTBoxSubOne_GLIP, RandomFlip_GLIP
 from .transforms import (Albu, CachedMixUp, CachedMosaic, CopyPaste, CutOut,
@@ -21,7 +21,7 @@ from .transforms import (Albu, CachedMixUp, CachedMosaic, CopyPaste, CutOut,
                          PhotoMetricDistortion, RandomAffine,
                          RandomCenterCropPad, RandomCrop, RandomErasing,
                          RandomFlip, RandomShift, Resize, ResizeShortestEdge,
-                         SegRescale, YOLOXHSVRandomAug)
+                         SegRescale, YOLOXHSVRandomAug, CenterPadImage)
 from .wrappers import MultiBranch, ProposalBroadcaster, RandomOrder
 
 __all__ = [
@@ -41,5 +41,6 @@ __all__ = [
     'LoadTrackAnnotations', 'BaseFrameSample', 'UniformRefFrameSample',
     'PackTrackInputs', 'PackReIDInputs', 'FixScaleResize',
     'ResizeShortestEdge', 'GTBoxSubOne_GLIP', 'RandomFlip_GLIP',
-    'RandomSamplingNegPos', 'LoadTextAnnotations', 'Rotate90'
+    'RandomSamplingNegPos', 'LoadTextAnnotations', 'Rotate90', 'LoadTIFMetaInfo',
+    'CenterPadImage'
 ]

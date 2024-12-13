@@ -5,6 +5,7 @@ import mmcv
 import numpy as np
 import pycocotools.mask as maskUtils
 import torch
+import rasterio
 from mmcv.transforms import BaseTransform
 from mmcv.transforms import LoadAnnotations as MMCV_LoadAnnotations
 from mmcv.transforms import LoadImageFromFile
@@ -151,6 +152,115 @@ class LoadMultiChannelImageFromFiles(BaseTransform):
                     f'backend_args={self.backend_args})')
         return repr_str
 
+@TRANSFORMS.register_module()
+class LoadMasks(BaseTransform):
+
+    def __init__(self, merge_masks: bool=False, scale: float=1., **kwargs):
+        self.merge_masks = merge_masks
+        self.scale = scale
+        return super().__init__(**kwargs)
+
+    def _poly2mask(self, mask_ann: Union[list, dict], img_h: int,
+                   img_w: int) -> np.ndarray:
+        """Private function to convert masks represented with polygon to
+        bitmaps.
+
+        Args:
+            mask_ann (list | dict): Polygon mask annotation input.
+            img_h (int): The height of output mask.
+            img_w (int): The width of output mask.
+
+        Returns:
+            np.ndarray: The decode bitmap mask of shape (img_h, img_w).
+        """
+
+        if isinstance(mask_ann, list):
+            # polygon -- a single object might consist of multiple parts
+            # we merge all parts into one mask rle code
+            rles = maskUtils.frPyObjects(mask_ann, img_h, img_w)
+            rle = maskUtils.merge(rles)
+        elif isinstance(mask_ann['counts'], list):
+            # uncompressed RLE
+            rle = maskUtils.frPyObjects(mask_ann, img_h, img_w)
+        else:
+            # rle
+            rle = mask_ann
+        mask = maskUtils.decode(rle)
+        return mask
+
+    def _process_masks(self, results: dict, scale: float=1.) -> list:
+        """Process gt_masks and filter invalid polygons.
+
+        Args:
+            results (dict): Result dict from :obj:``mmengine.BaseDataset``.
+
+        Returns:
+            list: Processed gt_masks.
+        """
+        gt_masks = []
+        gt_ignore_flags = []
+        for instance in results.get('instances', []):
+            gt_mask = instance['mask']
+            # If the annotation of segmentation mask is invalid,
+            # ignore the whole instance.
+            if isinstance(gt_mask, list):
+                gt_mask = [
+                    np.array(polygon) * scale for polygon in gt_mask
+                    if len(polygon) % 2 == 0 and len(polygon) >= 6
+                ]
+                if len(gt_mask) == 0:
+                    # ignore this instance and set gt_mask to a fake mask
+                    instance['ignore_flag'] = 1
+                    gt_mask = [np.zeros(6)]
+            elif not self.poly2mask:
+                # `PolygonMasks` requires a ploygon of format List[np.array],
+                # other formats are invalid.
+                instance['ignore_flag'] = 1
+                gt_mask = [np.zeros(6)]
+            elif isinstance(gt_mask, dict) and \
+                    not (gt_mask.get('counts') is not None and
+                         gt_mask.get('size') is not None and
+                         isinstance(gt_mask['counts'], (list, str))):
+                # if gt_mask is a dict, it should include `counts` and `size`,
+                # so that `BitmapMasks` can uncompressed RLE
+                instance['ignore_flag'] = 1
+                gt_mask = [np.zeros(6)]
+            gt_masks.append(gt_mask)
+            # re-process gt_ignore_flags
+            gt_ignore_flags.append(instance['ignore_flag'])
+        # results['gt_ignore_flags'] = np.array(gt_ignore_flags, dtype=bool)
+
+        return gt_masks
+
+    def transform(self, results: dict) -> dict:
+        ori_h, ori_w = results['ori_shape']
+        h, w = results['img_shape']
+        scale = h / ori_h
+        gt_masks = self._process_masks(results, scale)
+
+        if self.merge_masks:
+            new_gt_masks = []
+            for gt_mask in gt_masks:
+                new_gt_masks.extend(gt_mask)
+
+            if len(new_gt_masks) > 0:
+                gt_masks = [self._poly2mask(new_gt_masks, h, w)]
+
+            gt_masks = BitmapMasks(gt_masks, h, w)
+
+        else:
+            gt_masks = BitmapMasks(
+                [self._poly2mask(mask, h, w) for mask in gt_masks], h, w)
+
+        # results['gt_seg_map'] = gt_masks
+        results['gt_masks'] = gt_masks
+        results['gt_bboxes_labels'] = np.zeros(len(gt_masks), dtype=np.int64)
+
+        return results
+
+    def __repr__(self) -> str:
+        repr_str = self.__class__.__name__
+        return repr_str
 
 @TRANSFORMS.register_module()
 class LoadAnnotations(MMCV_LoadAnnotations):
@@ -262,6 +372,7 @@ class LoadAnnotations(MMCV_LoadAnnotations):
             # use for semseg
             reduce_zero_label: bool = False,
             ignore_index: int = 255,
+            num_max_instance: int = -1,
             **kwargs) -> None:
         super(LoadAnnotations, self).__init__(**kwargs)
         self.with_mask = with_mask
@@ -270,6 +381,7 @@ class LoadAnnotations(MMCV_LoadAnnotations):
         self.box_type = box_type
         self.reduce_zero_label = reduce_zero_label
         self.ignore_index = ignore_index
+        self.num_max_instance = num_max_instance
 
     def _load_bboxes(self, results: dict) -> None:
         """Private function to load bounding box annotations.
@@ -279,17 +391,23 @@ class LoadAnnotations(MMCV_LoadAnnotations):
         Returns:
             dict: The dict contains loaded bounding box annotations.
         """
+
         gt_bboxes = []
         gt_ignore_flags = []
         for instance in results.get('instances', []):
-            gt_bboxes.append(instance['bbox'])
+            if self.box_type == 'rbox':
+                gt_bboxes.append(instance['rotated_bbox'])
+            else:
+                gt_bboxes.append(instance['bbox'])
             gt_ignore_flags.append(instance['ignore_flag'])
+
         if self.box_type is None:
             results['gt_bboxes'] = np.array(
                 gt_bboxes, dtype=np.float32).reshape((-1, 4))
         else:
             _, box_type_cls = get_box_type(self.box_type)
             results['gt_bboxes'] = box_type_cls(gt_bboxes, dtype=torch.float32)
+
         results['gt_ignore_flags'] = np.array(gt_ignore_flags, dtype=bool)
 
     def _load_labels(self, results: dict) -> None:
@@ -336,7 +454,7 @@ class LoadAnnotations(MMCV_LoadAnnotations):
         mask = maskUtils.decode(rle)
         return mask
 
-    def _process_masks(self, results: dict) -> list:
+    def _process_masks(self, results: dict, scale=1.0) -> list:
         """Process gt_masks and filter invalid polygons.
 
         Args:
@@ -353,7 +471,7 @@ class LoadAnnotations(MMCV_LoadAnnotations):
             # ignore the whole instance.
             if isinstance(gt_mask, list):
                 gt_mask = [
-                    np.array(polygon) for polygon in gt_mask
+                    np.array(polygon) * scale for polygon in gt_mask
                     if len(polygon) % 2 == 0 and len(polygon) >= 6
                 ]
                 if len(gt_mask) == 0:
@@ -385,8 +503,10 @@ class LoadAnnotations(MMCV_LoadAnnotations):
         Args:
             results (dict): Result dict from :obj:``mmengine.BaseDataset``.
         """
-        h, w = results['ori_shape']
-        gt_masks = self._process_masks(results)
+        ori_h, ori_w = results['ori_shape']
+        h, w = results['img_shape']
+
+        gt_masks = self._process_masks(results, h / ori_h)
 
         if self.poly2mask:
             gt_masks = BitmapMasks(
@@ -453,7 +573,24 @@ class LoadAnnotations(MMCV_LoadAnnotations):
         results['gt_poly_jsons'] = features
         return results
 
+    def _load_rotated_bboxes(self, results: dict) -> None:
+        """Private function to load bounding box annotations.
 
+        Args:
+            results (dict): Result dict from :obj:``mmengine.BaseDataset``.
+        Returns:
+            dict: The dict contains loaded bounding box annotations.
+        """
+        gt_bboxes = []
+        for instance in results.get('instances', []):
+            gt_bboxes.append(instance['rotated_bbox'])
+
+        if self.box_type is None:
+            results['gt_rotated_bboxes'] = np.array(gt_bboxes, dtype=np.float32).reshape((-1, 4))
+
+        else:
+            _, box_type_cls = get_box_type(self.box_type)
+            results['gt_rotated_bboxes'] = box_type_cls(gt_bboxes, dtype=torch.float32)
 
     def transform(self, results: dict) -> dict:
         """Function to load multiple types annotations.
@@ -465,6 +602,10 @@ class LoadAnnotations(MMCV_LoadAnnotations):
             dict: The dict contains loaded bounding box, label and
             semantic segmentation.
         """
+        # if self.num_max_instance > 0 and len(results.get('instances', [])) > self.num_max_instance:
+        #     perm = np.random.permutation(len(results['instances']))
+        #     results['instances'] = [results['instances'][x] for x in perm[:self.num_max_instance]]
+        #     pdb.set_trace()
 
         if self.with_bbox:
             self._load_bboxes(results)
@@ -1102,3 +1243,34 @@ class LoadTrackAnnotations(LoadAnnotations):
         repr_str += f"imdecode_backend='{self.imdecode_backend}', "
         repr_str += f'file_client_args={self.file_client_args})'
         return repr_str
+
+@TRANSFORMS.register_module()
+class LoadTIFMetaInfo(LoadImageFromFile):
+    """Load an image from ``results['img']``.
+
+    Similar with :obj:`LoadImageFromFile`, but the image has been loaded as
+    :obj:`np.ndarray` in ``results['img']``. Can be used when loading image
+    from webcam.
+
+    Required Keys:
+
+    - img
+
+    Modified Keys:
+
+    - img
+    - img_path
+    - img_shape
+    - ori_shape
+
+    Args:
+        to_float32 (bool): Whether to convert the loaded image to a float32
+            numpy array. If set to False, the loaded image is an uint8 array.
+            Defaults to False.
+    """
+
+    def transform(self, results: dict) -> dict:
+        src = rasterio.open(results['img_path'])
+        results['tif_meta'] = src.meta
+
+        return results

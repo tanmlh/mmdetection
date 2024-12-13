@@ -4,6 +4,7 @@ import inspect
 import math
 import warnings
 from typing import List, Optional, Sequence, Tuple, Union
+import pdb
 
 import cv2
 import mmcv
@@ -233,6 +234,7 @@ class Resize(MMCV_Resize):
         self._resize_masks(results)
         self._resize_seg(results)
         self._record_homography_matrix(results)
+
         return results
 
     def __repr__(self) -> str:
@@ -700,6 +702,43 @@ class RandomShift(BaseTransform):
         repr_str += f'filter_thr_px={self.filter_thr_px})'
         return repr_str
 
+@TRANSFORMS.register_module()
+class CenterPadImage(BaseTransform):
+
+    def __init__(self, size=(1024, 1024), **kwargs):
+        self.size = size
+        super().__init__(**kwargs)
+
+    def pad_image_to_center(self, image, pad_h, pad_w):
+        # Get original image dimensions
+        h, w = image.shape[:2]
+
+        # Calculate padding on each side
+        top = (pad_h - h) // 2
+        bottom = pad_h - h - top
+        left = (pad_w - w) // 2
+        right = pad_w - w - left
+
+        # Pad the image using cv2.copyMakeBorder
+        padded_image = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+
+        return padded_image
+
+
+    def transform(self, results: dict) -> dict:
+        """Call function to pad images, masks, semantic segmentation maps.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Updated result dict.
+        """
+        img = results['img']
+        pad_img = self.pad_image_to_center(img, *self.size)
+        return results
+
+
 
 @TRANSFORMS.register_module()
 class Pad(MMCV_Pad):
@@ -782,6 +821,7 @@ class Pad(MMCV_Pad):
         self._pad_seg(results)
         self._pad_masks(results)
         return results
+
 
 
 @TRANSFORMS.register_module()
@@ -917,7 +957,12 @@ class RandomCrop(BaseTransform):
             bboxes.translate_([-offset_w, -offset_h])
             if self.bbox_clip_border:
                 bboxes.clip_(img_shape[:2])
-            valid_inds = bboxes.is_inside(img_shape[:2]).numpy()
+
+            valid_inds = bboxes.is_inside(img_shape[:2])
+            # valid_inds = valid_inds & ((bboxes.tensor[:,2] - bboxes.tensor[:,0]) >= 2)
+            # valid_inds = valid_inds & ((bboxes.tensor[:,3] - bboxes.tensor[:,1]) >= 2)
+            valid_inds = valid_inds.numpy()
+
             # If the crop does not contain any gt-bbox area and
             # allow_negative_crop is False, skip this image.
             if (not valid_inds.any() and not allow_negative_crop):

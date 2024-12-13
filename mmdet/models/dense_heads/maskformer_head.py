@@ -296,6 +296,7 @@ class MaskFormerHead(AnchorFreeHead):
         downsampled_gt_instances = InstanceData(
             labels=gt_labels, masks=gt_masks_downsampled)
         # assign and sample
+
         assign_result = self.assigner.assign(
             pred_instances=pred_instances,
             gt_instances=downsampled_gt_instances,
@@ -347,9 +348,13 @@ class MaskFormerHead(AnchorFreeHead):
         ]
         img_metas_list = [batch_img_metas for _ in range(num_dec_layers)]
 
+        # losses_cls, losses_mask, losses_dice = multi_apply(
+        #     self._loss_by_feat_single, all_cls_scores, all_mask_preds,
+        #     batch_gt_instances_list, img_metas_list)
+
         losses_cls, losses_mask, losses_dice = multi_apply(
-            self._loss_by_feat_single, all_cls_scores, all_mask_preds,
-            batch_gt_instances_list, img_metas_list)
+            self._loss_by_feat_single, all_cls_scores[-1:], all_mask_preds[-1:],
+            batch_gt_instances_list[-1:], img_metas_list[-1:])
 
         loss_dict = dict()
         # loss from the last decoder layer
@@ -364,6 +369,7 @@ class MaskFormerHead(AnchorFreeHead):
             loss_dict[f'd{num_dec_layer}.loss_mask'] = loss_mask_i
             loss_dict[f'd{num_dec_layer}.loss_dice'] = loss_dice_i
             num_dec_layer += 1
+
         return loss_dict
 
     def _loss_by_feat_single(self, cls_scores: Tensor, mask_preds: Tensor,

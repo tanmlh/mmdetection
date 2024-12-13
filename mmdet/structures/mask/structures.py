@@ -2,6 +2,7 @@
 import itertools
 from abc import ABCMeta, abstractmethod
 from typing import Sequence, Type, TypeVar
+import torch.nn.functional as F
 import pdb
 
 import cv2
@@ -9,6 +10,7 @@ import mmcv
 import numpy as np
 import pycocotools.mask as maskUtils
 import shapely.geometry as geometry
+import shapely
 import torch
 from mmcv.ops.roi_align import roi_align
 
@@ -687,6 +689,85 @@ class PolygonMasks(BaseInstanceMasks):
         """Number of masks."""
         return len(self.masks)
 
+    def from_json(poly_jsons, H, W):
+        new_polygons = []
+        for poly_json in poly_jsons:
+            rings = []
+            if poly_json['type'] == 'Polygon':
+                for ring in poly_json['coordinates']:
+                    rings.append(np.array(ring).reshape(-1))
+            elif poly_json['type'] == 'MultiPolygon':
+                for polygon in poly_json['coordinates']:
+                    for ring in polygon:
+                        rings.append(np.array(ring).reshape(-1))
+            else:
+                pdb.set_trace()
+                continue
+
+            # if len(rings) == 0:
+            #     pdb.set_trace()
+            new_polygons.append(rings)
+
+        return PolygonMasks(new_polygons, H, W)
+
+    def from_shapely(poly_shps, H, W):
+        poly_jsons = [shapely.geometry.mapping(x) for x in poly_shps]
+        polygon_masks = PolygonMasks.from_json(poly_jsons, H, W)
+        polygon_masks.masks_shapely = poly_shps
+
+        return polygon_masks
+
+    def get_shapely(self):
+        if not hasattr(self, 'masks_shapely') or len(self.masks_shapely) != len(self):
+            masks_shapely = []
+            for poly_json in self.to_json():
+                masks_shapely.append(shapely.geometry.shape(poly_json))
+            self.masks_shapely = masks_shapely
+
+        return self.masks_shapely
+
+    def extend(self, poly_masks):
+        assert self.height == poly_masks.height
+        assert self.width == poly_masks.width
+
+        return PolygonMasks(self.masks + poly_masks.masks, self.height, self.width)
+
+    def get_bounds(self):
+        masks_shapely = self.get_shapely()
+        bounds = np.array([x.bounds for x in masks_shapely])
+        return bounds
+
+    def get_valid_idxes(self):
+        self.get_shapely()
+        keep_idxes = []
+        for i, poly_shp in enumerate(self.masks_shapely):
+            if poly_shp.is_valid and not poly_shp.is_empty:
+                keep_idxes.append(i)
+
+        return np.array(keep_idxes, dtype=int)
+
+    def get_large_idxes(self, min_area=16):
+        self.get_shapely()
+        keep_idxes = []
+        for i, poly_shp in enumerate(self.masks_shapely):
+            if poly_shp.area >= min_area:
+                keep_idxes.append(i)
+
+        return np.array(keep_idxes, dtype=int)
+
+    def get_small_idxes(self, max_area=900):
+        self.get_shapely()
+        keep_idxes = []
+        for i, poly_shp in enumerate(self.masks_shapely):
+            if poly_shp.area <= max_area:
+                keep_idxes.append(i)
+
+        return np.array(keep_idxes, dtype=int)
+
+    def random_sample(self, num_sample):
+        sample_idxes = np.random.permutation(len(self.masks))[:num_sample]
+        return PolygonMasks(self[sample_idxes].masks, self.height, self.width)
+
     def rescale(self, scale, interpolation=None):
         """see :func:`BaseInstanceMasks.rescale`"""
         new_w, new_h = mmcv.rescale_size((self.width, self.height), scale)
@@ -812,6 +893,87 @@ class PolygonMasks(BaseInstanceMasks):
             cropped_masks = PolygonMasks(cropped_masks, h, w)
         return cropped_masks
 
+    def fast_crop_shapely(self, bbox):
+        self.get_shapely()
+        boundary = shapely.geometry.box(*bbox.tolist())
+
+        cropped_polys = []
+        for i, poly in enumerate(self.masks_shapely):
+            cropped_poly = poly.intersection(boundary)
+            # if cropped_poly.area > 0 and cropped_poly.area < poly.area - 1e-6:
+            #     pdb.set_trace()
+            cropped_polys.append(cropped_poly)
+
+        return PolygonMasks.from_shapely(cropped_polys, self.height, self.width)
+
+    def fast_crop(self, bbox):
+
+        def get_within_bounds_ids(bbox, bounds, type='has_intersection'):
+            """
+            type could be has_intersection or contain
+            """
+            if len(bounds) == 0:
+                return bounds
+
+            start_x, start_y, end_x, end_y = bbox
+
+            # start_x, start_y, end_x, end_y = crop_box
+            if type == 'contain':
+                flag1 = bounds[:,0] >= start_x
+                flag2 = bounds[:,2] < end_x
+                flag3 = bounds[:,1] >= start_y
+                flag4 = bounds[:,3] < end_y
+
+                return flag1 & flag2 & flag3 & flag4
+            elif type == 'has_intersection':
+                flag1 = bounds[:,0] > end_x
+                flag2 = bounds[:,2] < start_x
+                flag3 = bounds[:,1] > end_y
+                flag4 = bounds[:,3] < start_y
+
+                return (~(flag1 | flag2)) & (~(flag3 | flag4))
+            else:
+                raise ValueError()
+
+        """see :func:`BaseInstanceMasks.crop`"""
+        assert isinstance(bbox, np.ndarray)
+        assert bbox.ndim == 1
+
+        # clip the boundary
+        bbox = bbox.copy()
+        bbox[0::2] = np.clip(bbox[0::2], 0, self.width)
+        bbox[1::2] = np.clip(bbox[1::2], 0, self.height)
+        x1, y1, x2, y2 = bbox
+        w = np.maximum(x2 - x1, 1)
+        h = np.maximum(y2 - y1, 1)
+
+        if len(self.masks) == 0:
+            cropped_masks = PolygonMasks([], h, w)
+        else:
+            new_masks = []
+            bounds = []
+            for mask in self.masks:
+                points = np.concatenate(mask).reshape(-1,2)
+                min_x = points[:,0].min(axis=0)
+                max_x = points[:,0].max(axis=0)
+                min_y = points[:,1].min(axis=0)
+                max_y = points[:,1].max(axis=0)
+                bounds.append(np.array([min_x, min_y, max_x, max_y]))
+                new_mask = [(x.reshape(-1,2) - np.array([x1,y1])).reshape(-1) for x in mask]
+
+                new_masks.append(new_mask)
+
+            bounds = np.stack(bounds)
+            idxes = get_within_bounds_ids(bbox, bounds, type='has_intersection').nonzero()[0]
+
+            if len(idxes) == 0:
+                cropped_masks = PolygonMasks([], h, w)
+
+            cropped_masks = PolygonMasks([new_masks[x] for x in idxes], h, w)
+
+        return cropped_masks
+
+
     def pad(self, out_shape, pad_val=0):
         """padding has no effect on polygons`"""
         return PolygonMasks(self.masks, *out_shape)
@@ -826,6 +988,7 @@ class PolygonMasks(BaseInstanceMasks):
                         inds,
                         device='cpu',
                         interpolation='bilinear',
+                        clip_boundary=False,
                         binarize=True):
         """see :func:`BaseInstanceMasks.crop_and_resize`"""
         out_h, out_w = out_shape
@@ -857,7 +1020,15 @@ class PolygonMasks(BaseInstanceMasks):
                 # resize
                 p[0::2] = p[0::2] * w_scale
                 p[1::2] = p[1::2] * h_scale
+
+                if clip_boundary:
+                    p = p.reshape(-1,2)
+                    p[:,0] = p[:,0].clip(0,out_w)
+                    p[:,1] = p[:,1].clip(0,out_h)
+                    p = p.reshape(-1)
+
                 resized_mask.append(p)
+
             resized_masks.append(resized_mask)
         return PolygonMasks(resized_masks, *out_shape)
 
@@ -968,6 +1139,86 @@ class PolygonMasks(BaseInstanceMasks):
         bitmap_masks = self.to_ndarray()
         return BitmapMasks(bitmap_masks, self.height, self.width)
 
+    def merge(self):
+
+        new_masks = []
+        for mask in self.masks:
+            if len(mask) == 1 and (mask[0] == 0).all():
+                continue
+            new_masks.extend(mask)
+
+        if len(new_masks) == 0:
+            return PolygonMasks([[np.array([0,0,0,0,0,0])]], self.height, self.width)
+
+        return PolygonMasks([new_masks], self.height, self.width)
+
+    def paste_by_bboxes(self, bboxes, h, w):
+        assert len(self.masks) == len(bboxes)
+
+        N = len(self.masks)
+        w_scale = (bboxes[:,2] - bboxes[:,0]) / h
+        h_scale = (bboxes[:,3] - bboxes[:,1]) / w
+
+        scales = np.stack([w_scale, h_scale], axis=1)
+        offsets = bboxes[:,:2]
+
+        new_masks = []
+        for i, rings in enumerate(self.masks):
+            new_rings = []
+            for ring in rings:
+                new_ring = ring.reshape(-1,2) * scales[i] + offsets[i]
+                new_rings.append(new_ring.reshape(-1))
+
+            new_masks.append(new_rings)
+
+        return PolygonMasks(new_masks, self.height, self.width)
+
+    def canonicalize(self):
+
+        def canonical_representation(ring):
+            # Ensure input is valid
+            if not (ring[0] == ring[-1]).all():
+                raise ValueError("Input polygon must be closed, i.e., ring[0] should be equal to ring[-1]")
+            ring = ring[:-1]
+            centroid = np.mean(ring, axis=0)
+            vectors = ring - centroid  # Vectors from centroid to each vertex
+            angles = np.arctan2(vectors[:, 1], vectors[:, 0])  # Calculate angles using arctan2(y, x)
+            min_angle_index = np.argmin(angles)
+            rotated_ring = np.roll(ring, -min_angle_index, axis=0)
+            rotated_ring = np.vstack([rotated_ring, rotated_ring[0]])
+            return rotated_ring
+
+        new_masks = []
+        for rings in self.masks:
+            new_rings = []
+            for ring in rings:
+                new_ring = canonical_representation(ring.reshape(-1,2))
+                new_rings.append(new_ring.reshape(-1))
+
+            new_masks.append(new_rings)
+
+        return PolygonMasks(new_masks, self.height, self.width)
+
+
+    def centerize(self):
+        bounds = self.get_bounds()
+        self.bounds = bounds
+        new_masks = []
+        for i, rings in enumerate(self.masks):
+            new_rings = []
+            for ring in rings:
+                new_ring = ring.reshape(-1,2) - bounds[i, :2]
+                new_rings.append(new_ring.reshape(-1))
+
+            new_masks.append(new_rings)
+
+        return PolygonMasks(new_masks, self.height, self.width)
+ 
+
+    def de_centerize(self):
+        assert hasattr(self, 'bounds'), 'the centerize function must be called before de-centerize them!'
+        pdb.set_trace()
+
     @property
     def areas(self):
         """Compute areas of masks.
@@ -979,6 +1230,7 @@ class PolygonMasks(BaseInstanceMasks):
         Return:
             ndarray: areas of each instance
         """  # noqa: W501
+
         area = []
         for polygons_per_obj in self.masks:
             area_per_obj = 0
@@ -1087,6 +1339,82 @@ class PolygonMasks(BaseInstanceMasks):
                 poly_jsons.append(poly_json)
 
         return poly_jsons
+
+    def to_coco(self):
+        segmentations = [[x.tolist() for x in mask] for mask in self.masks]
+        return segmentations
+
+    def remove_small_holes(self, min_area=64):
+        new_masks = []
+        for polygon in self.masks:
+            new_rings = []
+            for i, p in enumerate(polygon):
+                if i == 0:
+                    new_rings.append(p)
+                    continue
+                ring_area = self._polygon_area(p[0::2], p[1::2])
+                if ring_area >= min_area:
+                    new_rings.append(p)
+
+            new_masks.append(new_rings)
+
+        return PolygonMasks(new_masks, self.height, self.width)
+
+    def sample_points(self, interval=None, num_bins=None, pad_length=None, num_min_bins=8, num_max_bins=512):
+
+        """
+        Interpolates points on a ring with unequal segment lengths using parameters ts.
+
+        :param points: NumPy array of shape (N, 2) representing N 2-D points on the ring.
+        :param ts: NumPy array of parameters for interpolation, where each element is in [0, 1].
+        :return: NumPy array of shape (len(ts), 2) representing the interpolated points on the ring.
+        """
+        assert interval is not None or num_bins is not None
+
+
+        sampled_polygons = []
+        for rings in self.masks:
+            sampled_rings = []
+            for ring in rings:
+                points = ring.reshape(-1,2)
+                if not (points[0] == points[-1]).all():
+                    points = np.concatenate([points, points[:1]])
+
+                N = points.shape[0]  # Number of points
+
+                segment_lengths = np.sqrt(((points - np.roll(points, -1, axis=0))**2).sum(axis=1))
+                perimeter = segment_lengths.sum()
+                if num_bins is None:
+                    num_bins = max(round(perimeter / interval), num_min_bins)
+
+                # num_bins = min(num_bins, N)
+                ts = np.linspace(0, 1, num_bins)
+                ts = np.mod(ts, 1)
+
+                # Calculate cumulative length proportions
+                cumulative_lengths = np.concatenate(([0], np.cumsum(segment_lengths))) / perimeter
+
+                # Function to find the segment index for each t
+                def find_segment_index(t, cumulative_lengths):
+                    return np.searchsorted(cumulative_lengths, t, side='right') - 1
+
+                # Map ts to segment indices
+                # segment_indices = find_segment_index(ts, cumulative_lengths)
+                segment_indices = np.searchsorted(cumulative_lengths, ts, side='right') - 1
+
+                # Calculate t' for each segment
+                t_primes = (ts - cumulative_lengths[segment_indices]) / (segment_lengths[segment_indices] / perimeter)
+
+                # Interpolate within the selected segments
+                start_points = points[segment_indices]
+                end_points = points[(segment_indices + 1) % N]  # Wrap around to the first point for the last segment
+                interpolated_points = start_points + (end_points - start_points) * t_primes[:, np.newaxis]
+
+                sampled_rings.append(interpolated_points.reshape(-1))
+
+            sampled_polygons.append(sampled_rings)
+
+        return PolygonMasks(sampled_polygons, self.height, self.width)
 
     @classmethod
     def random(cls,

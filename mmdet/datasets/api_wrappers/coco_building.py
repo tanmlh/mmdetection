@@ -158,6 +158,8 @@ class COCOeval:
                      for imgId in p.imgIds
                      for catId in catIds}
 
+        # pdb.set_trace()
+
         evaluateImg = self.evaluateImg
         maxDet = p.maxDets[-1]
         self.evalImgs = [evaluateImg(imgId, catId, areaRng, maxDet)
@@ -195,6 +197,8 @@ class COCOeval:
 
         # compute iou between each dt and gt region
         iscrowd = [int(o['iscrowd']) for o in gt]
+        # if len(d) > 0:
+        #     pdb.set_trace()
         ious = maskUtils.iou(d, g, iscrowd)
         return ious
 

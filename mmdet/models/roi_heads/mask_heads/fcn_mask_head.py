@@ -2,6 +2,7 @@
 from typing import List, Tuple
 
 import numpy as np
+import pdb
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -329,7 +330,8 @@ class FCNMaskHead(BaseModule):
         """
         scale_factor = bboxes.new_tensor(img_meta['scale_factor']).repeat(
             (1, 2))
-        img_h, img_w = img_meta['ori_shape'][:2]
+        # img_h, img_w = img_meta['ori_shape'][:2]
+        img_h, img_w = img_meta['batch_input_shape'][:2]
         device = bboxes.device
 
         if not activate_map:
@@ -394,6 +396,7 @@ class FCNMaskHead(BaseModule):
                 masks_chunk = (masks_chunk * 255).to(dtype=torch.uint8)
 
             im_mask[(inds, ) + spatial_inds] = masks_chunk
+
         return im_mask
 
 

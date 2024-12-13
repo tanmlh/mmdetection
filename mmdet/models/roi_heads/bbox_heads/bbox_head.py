@@ -204,20 +204,19 @@ class BBoxHead(BaseModule):
         bbox_targets = pos_priors.new_zeros(num_samples, reg_dim)
         bbox_weights = pos_priors.new_zeros(num_samples, reg_dim)
 
-        # pdb.set_trace()
         if num_pos > 0:
             labels[:num_pos] = pos_gt_labels
             pos_weight = 1.0 if cfg.pos_weight <= 0 else cfg.pos_weight
             label_weights[:num_pos] = pos_weight
             if not self.reg_decoded_bbox:
-                pos_bbox_targets = self.bbox_coder.encode(
-                    pos_priors, pos_gt_bboxes)
+                pos_bbox_targets = self.bbox_coder.encode(pos_priors, pos_gt_bboxes)
             else:
                 # When the regression loss (e.g. `IouLoss`, `GIouLoss`)
                 # is applied directly on the decoded bounding boxes, both
                 # the predicted boxes and regression targets should be with
                 # absolute coordinate format.
                 pos_bbox_targets = get_box_tensor(pos_gt_bboxes)
+
             bbox_targets[:num_pos, :] = pos_bbox_targets
             bbox_weights[:num_pos, :] = 1
         if num_neg > 0:
@@ -283,6 +282,7 @@ class BBoxHead(BaseModule):
             label_weights = torch.cat(label_weights, 0)
             bbox_targets = torch.cat(bbox_targets, 0)
             bbox_weights = torch.cat(bbox_weights, 0)
+
         return labels, label_weights, bbox_targets, bbox_weights
 
     def loss_and_target(self,

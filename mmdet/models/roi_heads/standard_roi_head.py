@@ -120,6 +120,12 @@ class StandardRoIHead(BaseRoIHead):
             rpn_results = rpn_results_list[i]
             rpn_results.priors = rpn_results.pop('bboxes')
 
+            if ((batch_gt_instances[i].bboxes[:,2] - batch_gt_instances[i].bboxes[:,0]) <= 0).any():
+                pdb.set_trace()
+
+            if ((batch_gt_instances[i].bboxes[:,3] - batch_gt_instances[i].bboxes[:,1]) <= 0).any():
+                pdb.set_trace()
+
             assign_result = self.bbox_assigner.assign(
                 rpn_results, batch_gt_instances[i],
                 batch_gt_instances_ignore[i])
@@ -417,4 +423,5 @@ class StandardRoIHead(BaseRoIHead):
             batch_img_metas=batch_img_metas,
             rcnn_test_cfg=self.test_cfg,
             rescale=rescale)
+
         return results_list

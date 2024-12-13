@@ -77,6 +77,7 @@ class BaseBoxes(metaclass=ABCMeta):
             ('The boxes dimension must >= 2 and the length of the last '
              f'dimension must be {self.box_dim}, but got boxes with '
              f'shape {data.shape}.')
+
         self.tensor = data
 
     def convert_to(self, dst_type: Union[str, type]) -> 'BaseBoxes':

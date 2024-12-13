@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import warnings
 from typing import List, Optional, Tuple, Union
+import pdb
 
 import numpy as np
 import torch
@@ -298,6 +299,7 @@ class AnchorGenerator:
         # then (0, 1), (0, 2), ...
         if self.use_box_type:
             all_anchors = HorizontalBoxes(all_anchors)
+
         return all_anchors
 
     def sparse_priors(self,

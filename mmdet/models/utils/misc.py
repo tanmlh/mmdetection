@@ -156,7 +156,7 @@ def empty_instances(batch_img_metas: List[dict],
     Returns:
         list[:obj:`InstanceData`]: Detection results of each image
     """
-    assert task_type in ('bbox', 'mask'), 'Only support bbox and mask,' \
+    assert task_type in ('bbox', 'mask', 'poly'), 'Only support bbox, mask and poly,' \
                                           f' but got {task_type}'
 
     if instance_results is not None:
@@ -181,9 +181,10 @@ def empty_instances(batch_img_metas: List[dict],
             results.labels = torch.zeros((0, ),
                                          device=device,
                                          dtype=torch.long)
-        else:
+        elif task_type == 'mask':
             # TODO: Handle the case where rescale is false
-            img_h, img_w = batch_img_metas[img_id]['ori_shape'][:2]
+            # img_h, img_w = batch_img_metas[img_id]['ori_shape'][:2]
+            img_h, img_w = batch_img_metas[img_id]['img_shape'][:2]
             # the type of `im_mask` will be torch.bool or torch.uint8,
             # where uint8 if for visualization and debugging.
             im_mask = torch.zeros(
@@ -193,6 +194,11 @@ def empty_instances(batch_img_metas: List[dict],
                 device=device,
                 dtype=torch.bool if mask_thr_binary >= 0 else torch.uint8)
             results.masks = im_mask
+
+        elif task_type == 'poly':
+            img_h, img_w = batch_img_metas[img_id]['img_shape'][:2]
+            results.segmentations = PolygonMasks([], img_h, img_w)
+
         results_list.append(results)
     return results_list
 

@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import copy
 from typing import Optional, Union
+import pdb
 
 import torch
 from mmengine.structures import InstanceData
@@ -200,8 +201,8 @@ class MaxIoUAssigner(BaseAssigner):
         else:
             gt_bboxes_ignore = None
 
-        assign_on_cpu = True if (self.gpu_assign_thr > 0) and (
-            gt_bboxes.shape[0] > self.gpu_assign_thr) else False
+        assign_on_cpu = True if (self.gpu_assign_thr > 0) and (gt_bboxes.shape[0] > self.gpu_assign_thr) else False
+
         # compute overlap and assign gt on CPU when number of GT is large
         if assign_on_cpu:
             device = priors.device
@@ -212,11 +213,10 @@ class MaxIoUAssigner(BaseAssigner):
                 gt_bboxes_ignore = gt_bboxes_ignore.cpu()
 
         if self.perm_repeat_gt_cfg is not None and priors.numel() > 0:
-            gt_bboxes_unique = perm_repeat_bboxes(gt_bboxes,
-                                                  self.iou_calculator,
-                                                  self.perm_repeat_gt_cfg)
+            gt_bboxes_unique = perm_repeat_bboxes(gt_bboxes, self.iou_calculator, self.perm_repeat_gt_cfg)
         else:
             gt_bboxes_unique = gt_bboxes
+
         overlaps = self.iou_calculator(gt_bboxes_unique, priors)
 
         if (self.ignore_iof_thr > 0 and gt_bboxes_ignore is not None

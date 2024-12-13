@@ -58,7 +58,8 @@ class TanmlhVisualizationHook(Hook):
                  show: bool = False,
                  wait_time: float = 0.,
                  test_out_dir: Optional[str] = None,
-                 backend_args: dict = None):
+                 backend_args: dict = None,
+                 BGR2RGB: bool = True):
         self._visualizer: Visualizer = Visualizer.get_current_instance()
         self.interval = interval
         self.score_thr = score_thr
@@ -76,6 +77,7 @@ class TanmlhVisualizationHook(Hook):
         self.draw = draw
         self.test_out_dir = test_out_dir
         self._test_index = 0
+        self.BGR2RGB = BGR2RGB
 
     # def after_train_iter(self, runner: Runner, batch_idx: int, data_batch: dict,
     #                    outputs: Sequence[DetDataSample]) -> None:
@@ -101,8 +103,11 @@ class TanmlhVisualizationHook(Hook):
 
         # Visualize only the first data
         img_path = outputs[0].img_path
-        img_bytes = get(img_path, backend_args=self.backend_args)
-        img = mmcv.imfrombytes(img_bytes, channel_order='rgb')
+        # img_bytes = get(img_path, backend_args=self.backend_args)
+        # img = mmcv.imfrombytes(img_bytes, channel_order='rgb')
+        img = data_batch['inputs'][0].permute(1,2,0).numpy()
+        if self.BGR2RGB:
+            img = img[:,:,[2,1,0]]
 
         # img = data_batch['inputs'][0].permute(1,2,0).numpy()
 
@@ -136,14 +141,15 @@ class TanmlhVisualizationHook(Hook):
                                          self.test_out_dir)
             mkdir_or_exist(self.test_out_dir)
 
-        for data_sample in outputs:
+        for i, data_sample in enumerate(outputs):
             self._test_index += 1
 
             img_path = data_sample.img_path
-            img_bytes = get(img_path, backend_args=self.backend_args)
-            img = mmcv.imfrombytes(img_bytes, channel_order='rgb')
-
-            # img = data_batch['inputs'][0].permute(1,2,0).numpy()
+            # img_bytes = get(img_path, backend_args=self.backend_args)
+            # img = mmcv.imfrombytes(img_bytes, channel_order='rgb')
+            img = data_batch['inputs'][0].permute(1,2,0).numpy()
+            if self.BGR2RGB:
+                img = img[:,:,[2,1,0]]
 
             out_file = None
             if self.test_out_dir is not None:

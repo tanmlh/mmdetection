@@ -1,6 +1,8 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import datetime
+import fiona
 import itertools
+import os
 import os.path as osp
 import tempfile
 from collections import OrderedDict
@@ -8,6 +10,8 @@ from typing import Dict, List, Optional, Sequence, Union
 import pdb
 import pycocotools.mask as mask_util
 import shapely
+import cv2
+from affine import Affine
 
 import numpy as np
 import torch
@@ -20,7 +24,7 @@ from mmdet.datasets.api_wrappers import COCO, COCOeval, COCOevalMP, COCOevalBuil
 from mmdet.registry import METRICS
 from mmdet.structures.mask import encode_mask_results
 import mmdet.utils.tanmlh_polygon_utils as polygon_utils
-from ..functional import eval_recalls
+from ..functional import eval_recalls, eval_map
 
 
 @METRICS.register_module()
@@ -90,11 +94,14 @@ class CocoMetric(BaseMetric):
                  mask_type: str='binary',
                  calculate_mta: bool=False,
                  calculate_iou_ciou: bool=False,
-                 score_thre: float=0.5) -> None:
+                 score_thre: float=0.5,
+                 min_bbox_size: int=-1,
+                 split_meta_key: Optional[str] = None,
+                 out_cfg: dict = {}) -> None:
         super().__init__(collect_device=collect_device, prefix=prefix)
         # coco evaluation metrics
         self.metrics = metric if isinstance(metric, list) else [metric]
-        allowed_metrics = ['bbox', 'segm', 'proposal', 'proposal_fast']
+        allowed_metrics = ['bbox', 'segm', 'proposal', 'proposal_fast', 'bbox_fast', 'map_fast']
         for metric in self.metrics:
             if metric not in allowed_metrics:
                 raise KeyError(
@@ -127,6 +134,7 @@ class CocoMetric(BaseMetric):
         self.calculate_mta = calculate_mta
         self.calculate_iou_ciou = calculate_iou_ciou
         self.score_thre = score_thre
+        self.split_meta_key = split_meta_key
 
         self.backend_args = backend_args
         if file_client_args is not None:
@@ -154,12 +162,26 @@ class CocoMetric(BaseMetric):
                     sorted_categories = sorted(
                         categories, key=lambda i: i['id'])
                     self._coco_api.dataset['categories'] = sorted_categories
+                if min_bbox_size > 0:
+                    for ann in self._coco_api.dataset['annotations']:
+                        x1, y1, w, h = ann['bbox']
+                        if w <= min_bbox_size:
+                            x1 -= (min_bbox_size - w) / 2
+                            w = min_bbox_size
+
+                        if h <= min_bbox_size:
+                            y1 -= (min_bbox_size - h) / 2
+                            h = min_bbox_size
+                        ann['bbox'] = [x1, y1, w, h]
+
+
         else:
             self._coco_api = None
 
         # handle dataset lazy init
         self.cat_ids = None
         self.img_ids = None
+        self.out_cfg = out_cfg
 
     def fast_eval_recall(self,
                          results: List[dict],
@@ -197,8 +219,7 @@ class CocoMetric(BaseMetric):
                 bboxes = np.zeros((0, 4))
             gt_bboxes.append(bboxes)
 
-        recalls = eval_recalls(
-            gt_bboxes, pred_bboxes, proposal_nums, iou_thrs, logger=logger)
+        recalls = eval_recalls(gt_bboxes, pred_bboxes, proposal_nums, iou_thrs, logger=logger)
         ar = recalls.mean(axis=1)
         return ar
 
@@ -246,7 +267,7 @@ class CocoMetric(BaseMetric):
         segm_json_results = [] if 'masks' in results[0] else None
         for idx, result in enumerate(results):
             image_id = result.get('img_id', idx)
-            labels = result['labels']
+            labels = result['labels'].astype(int)
             bboxes = result['bboxes']
             scores = result['scores']
             # bbox results
@@ -275,6 +296,7 @@ class CocoMetric(BaseMetric):
                 data['segmentation'] = masks[i]
                 if 'polygons' in result:
                     data['polygon'] = result['polygons'][i]
+
                 segm_json_results.append(data)
 
         result_files = dict()
@@ -379,11 +401,122 @@ class CocoMetric(BaseMetric):
             result['labels'] = pred['labels'].cpu().numpy()
             # result['labels'] = np.zeros(len(pred['labels']))
 
+            if 'gt_instances' in data_sample:
+                result['gt_instances'] = data_sample['gt_instances']
+
             # encode mask to RLE
-            if 'masks' in pred:
-                result['masks'] = encode_mask_results(
-                    pred['masks'].detach().cpu().numpy()) if isinstance(
-                        pred['masks'], torch.Tensor) else pred['masks']
+            # if 'masks' in pred:
+            #     result['masks'] = encode_mask_results(
+            #         pred['masks'].detach().cpu().numpy()) if isinstance(
+            #             pred['masks'], torch.Tensor) else pred['masks']
+
+
+            if 'proposals' in data_sample:
+                result['proposals'] = data_sample['proposals']['bboxes'].cpu().numpy()
+
+            if 'pred_sem_seg' in data_sample:
+                pred_sem_seg = data_sample['pred_sem_seg']['sem_seg'].cpu().numpy()
+                if len(data_sample['gt_instances']['masks']) == 0:
+                    gt_sem_seg = np.zeros_like(pred_sem_seg)
+                else:
+                    gt_sem_seg = data_sample['gt_instances']['masks'].merge().to_ndarray()
+                # intersect = np.logical_and(pred_sem_seg[0], gt_sem_seg).sum()
+                # union = np.logical_or(pred_sem_seg[0], gt_sem_seg).sum()
+                tp = pred_sem_seg * gt_sem_seg
+                tn = (1 - pred_sem_seg) * gt_sem_seg
+                fp = pred_sem_seg * (1 - gt_sem_seg)
+                fn = (1 - pred_sem_seg) * (1 - gt_sem_seg)
+
+                result['iou_pre_eval'] = [tp, tn, fp, fn]
+
+            if self.split_meta_key is not None:
+                assert self.split_meta_key in data_sample
+                result[self.split_meta_key] = data_sample[self.split_meta_key]
+
+
+            if 'tif_meta' in data_sample and self.out_cfg.get('save_results', False):
+                import rasterio
+                tif_meta = data_sample['tif_meta']
+                out_dir = self.out_cfg['out_dir']
+                mask_out_dir = os.path.join(out_dir, 'mask')
+                os.makedirs(mask_out_dir, exist_ok=True)
+
+                img_name = data_sample['img_path'].split('/')[-1].split('.')[0]
+
+                cur_pred_mask = (pred_sem_seg[0] * 255).astype(np.uint8)
+                mask_out_path = osp.join(mask_out_dir, f'{img_name}.tif')
+                if self.out_cfg.get('out_size', None) is not None:
+                    out_size = self.out_cfg.get('out_size', None)
+                    cur_pred_mask = cv2.resize(cur_pred_mask.astype(float), out_size).astype(np.uint8) * 255
+
+                out_poly_scale = self.out_cfg.get('out_poly_scale', 1.)
+
+                transform = list(tif_meta['transform'])
+                transform[0] *= out_poly_scale
+                transform[4] *= out_poly_scale
+                transform = Affine(*transform)
+
+                with rasterio.open(
+                    mask_out_path, 'w', driver='GTiff',
+                    height=cur_pred_mask.shape[0],
+                    width=cur_pred_mask.shape[1],
+                    count=1,
+                    dtype=str(cur_pred_mask.dtype),
+                    crs=tif_meta['crs'],
+                    transform=transform
+                ) as dst:
+                    dst.write(cur_pred_mask, 1)
+
+                if 'segmentations' in pred:
+                    poly_out_dir = os.path.join(out_dir, 'poly')
+                    os.makedirs(poly_out_dir, exist_ok=True)
+                    poly_out_path = osp.join(poly_out_dir, f'{img_name}.geojson')
+
+                    poly_jsons = pred['segmentations']
+                    out_poly_scale = self.out_cfg.get('out_poly_scale', 1.)
+                    transform = tif_meta['transform']
+                    affine_matrix = np.array([
+                        [transform.a, transform.b, transform.c],
+                        [transform.d, transform.e, transform.f],
+                        [0, 0, 1]  # Homogeneous row
+                    ])
+
+                    new_poly_jsons = []
+                    for poly_json in poly_jsons:
+                        new_coords = []
+                        if poly_json['type'] == 'Polygon':
+                            for coords in poly_json['coordinates']:
+                                coords = (np.array(coords) * out_poly_scale)
+                                ones_column = np.ones((coords.shape[0], 1))
+                                ones_coords = np.hstack([coords, ones_column])
+                                trans_coords = (ones_coords @ affine_matrix.T)[:,:2]
+
+                                new_coords.append(trans_coords.tolist())
+
+                            temp = dict(
+                                type='Polygon',
+                                coordinates=new_coords
+                            )
+                            new_poly_jsons.append(temp)
+
+                    poly_jsons = new_poly_jsons
+
+                    schema = {
+                        'geometry': 'Polygon',
+                        'properties': {}  # If you have properties, define them here
+                    }
+
+                    with fiona.open(poly_out_path, 'w', driver='GeoJSON',
+                                    crs=tif_meta['crs'], schema=schema) as dst:
+
+                        for polygon in poly_jsons:
+                            # Write each polygon into the GeoJSON file
+                            dst.write({
+                                'geometry': polygon,
+                                'properties': {}
+                            })
+
+
 
             # use polygon predictions first
             if 'segmentations' in pred and self.mask_type=='polygon':
@@ -449,9 +582,26 @@ class CocoMetric(BaseMetric):
             the metrics, and the values are corresponding results.
         """
         logger: MMLogger = MMLogger.get_current_instance()
+        eval_results = OrderedDict()
 
         # split gt and prediction list
         gts, preds = zip(*results)
+
+        if 'iou_pre_eval' in preds[0]:
+            tps = np.array([x['iou_pre_eval'][0] for x in preds])
+            tns = np.array([x['iou_pre_eval'][1] for x in preds])
+            fps = np.array([x['iou_pre_eval'][2] for x in preds])
+            fns = np.array([x['iou_pre_eval'][3] for x in preds])
+
+            iou = tps.sum() / (tps.sum() + tns.sum() + fps.sum())
+            precision = tps.sum() / (tps.sum() + fps.sum())
+            recall = tps.sum() / (tps.sum() + tns.sum())
+
+            logger.info(f'IoU: {iou}, precision: {precision}, recall: {recall}')
+
+            eval_results['iou'] = iou
+            eval_results['precision'] = precision
+            eval_results['recall'] = recall
 
         if 'mtas' in preds[0]:
             mtas = []
@@ -464,7 +614,6 @@ class CocoMetric(BaseMetric):
                 mean_mta = np.array(mtas).mean()
 
             logger.info(f'MTA: {mean_mta}')
-
 
         tmp_dir = None
         if self.outfile_prefix is None:
@@ -490,7 +639,6 @@ class CocoMetric(BaseMetric):
         # convert predictions to coco format and dump to json file
         result_files = self.results2json(preds, outfile_prefix)
 
-        eval_results = OrderedDict()
         if self.format_only:
             logger.info('results are saved in '
                         f'{osp.dirname(outfile_prefix)}')
@@ -499,18 +647,40 @@ class CocoMetric(BaseMetric):
         for metric in self.metrics:
             logger.info(f'Evaluating {metric}...')
 
+            if metric == 'map_fast':
+                logger.info(f'Evaluating {metric} ...')
+                det_bboxes = [[x['bboxes']] for x in preds]
+                annotations = [x['gt_instances'] for x in preds]
+                mean_ap, ap_result = eval_map(det_bboxes, annotations)
+                eval_results['AP@50'] = mean_ap
+                continue
+
             # TODO: May refactor fast_eval_recall to an independent metric?
             # fast eval recall
             if metric == 'proposal_fast':
+                temp = [dict(bboxes=x['proposals']) for x in preds]
+                ar = self.fast_eval_recall(temp, self.proposal_nums, self.iou_thrs, logger=logger)
+
+                log_msg = []
+                for i, num in enumerate(self.proposal_nums):
+                    eval_results[f'AR@{num}'] = ar[i]
+                    log_msg.append(f'\nAR@{num}\t{ar[i]:.4f}')
+
+                log_msg = 'AR results of proposals:\n' + ''.join(log_msg)
+                logger.info(log_msg)
+                continue
+
+            if metric == 'bbox_fast':
                 ar = self.fast_eval_recall(
                     preds, self.proposal_nums, self.iou_thrs, logger=logger)
                 log_msg = []
                 for i, num in enumerate(self.proposal_nums):
                     eval_results[f'AR@{num}'] = ar[i]
                     log_msg.append(f'\nAR@{num}\t{ar[i]:.4f}')
-                log_msg = ''.join(log_msg)
+                log_msg = 'AR results of bboxes:\n' + ''.join(log_msg)
                 logger.info(log_msg)
                 continue
+
 
             # evaluate proposal, bbox and segm
             iou_type = 'bbox' if metric == 'proposal' else metric
@@ -533,7 +703,6 @@ class CocoMetric(BaseMetric):
                 logger.error(
                     'The testing results of the whole dataset is empty.')
                 break
-
 
             if self.use_building_eval:
                 coco_eval = COCOevalBuilding(self._coco_api, coco_dt, iou_type)
@@ -680,6 +849,14 @@ class CocoMetric(BaseMetric):
                 eval_results['c_iou'] = np.array(c_ious).mean()
                 eval_results['N_ratio'] = N_pairs[0] / N_pairs[1]
                 logger.info(f'iou: {eval_results["iou"]}, c_iou: {eval_results["c_iou"]}, N_ratio: {N_pairs[0] / N_pairs[1]}')
+
+            """
+            if self.calculate_sem_seg_iou_ciou:
+                pred_sem_seg_list = [x['pred_sem_seg'] for x in preds]
+                ious = polygon_utils.compute_sem_seg_IoU_cIoU(
+                    pred_sem_seg_list, coco_eval.cocoGt
+                )
+            """
 
 
         if tmp_dir is not None:

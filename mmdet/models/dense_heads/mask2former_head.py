@@ -14,7 +14,7 @@ from torch import Tensor
 
 from mmdet.registry import MODELS, TASK_UTILS
 from mmdet.structures import SampleList
-from mmdet.utils import (ConfigType, InstanceList, OptConfigType, OptMultiConfig, reduce_mean)
+from mmdet.utils import (ConfigType, InstanceList, OptConfigType, OptMultiConfig, reduce_mean, tanmlh_utils)
 from ..layers import Mask2FormerTransformerDecoder, SinePositionalEncoding
 from ..utils import get_uncertain_point_coords_with_randomness
 from ..utils import multi_apply, preprocess_panoptic_gt
@@ -204,10 +204,10 @@ class Mask2FormerHead(MaskFormerHead):
             gt_instances['masks'] for gt_instances in batch_gt_instances
         ]
         # scale = batch_img_metas[0]['img_shape'][0] / batch_img_metas[0]['ori_shape'][0]
-        scale=1.
-        gt_poly_jsons_list = [
-            gt_instances['masks'].to_json(scale=scale) for gt_instances in batch_gt_instances
-        ]
+        # scale=1.
+        # gt_poly_jsons_list = [
+        #     gt_instances['masks'].to_json(scale=scale) for gt_instances in batch_gt_instances
+        # ]
         gt_semantic_segs = [
             None if gt_semantic_seg is None else gt_semantic_seg.sem_seg
             for gt_semantic_seg in batch_gt_semantic_segs
@@ -216,9 +216,13 @@ class Mask2FormerHead(MaskFormerHead):
                               gt_masks_list, gt_semantic_segs, num_things_list,
                               num_stuff_list)
         labels, masks = targets
+        # batch_gt_instances = [
+        #     InstanceData(labels=label, masks=mask, poly_jsons=poly_json)
+        #     for label, mask, poly_json in zip(labels, masks, gt_poly_jsons_list)
+        # ]
         batch_gt_instances = [
-            InstanceData(labels=label, masks=mask, poly_jsons=poly_json)
-            for label, mask, poly_json in zip(labels, masks, gt_poly_jsons_list)
+            InstanceData(labels=label, masks=mask)
+            for label, mask in zip(labels, masks)
         ]
         return batch_gt_instances
 
@@ -279,6 +283,7 @@ class Mask2FormerHead(MaskFormerHead):
             pred_instances=sampled_pred_instances,
             gt_instances=sampled_gt_instances,
             img_meta=img_meta)
+
         pred_instances = InstanceData(scores=cls_score, masks=mask_pred)
         sampling_result = self.sampler.sample(
             assign_result=assign_result,
@@ -454,6 +459,7 @@ class Mask2FormerHead(MaskFormerHead):
                     decoder layer. Each with shape (batch_size, num_queries, \
                     h, w).
         """
+
         batch_size = x[0].shape[0]
         mask_features, multi_scale_memorys = self.pixel_decoder(x)
         # multi_scale_memorys (from low resolution to high resolution)
@@ -513,3 +519,56 @@ class Mask2FormerHead(MaskFormerHead):
             mask_pred_list.append(mask_pred)
 
         return cls_pred_list, mask_pred_list
+
+    def loss(
+        self,
+        x: Tuple[Tensor],
+        batch_data_samples: SampleList,
+    ) -> Dict[str, Tensor]:
+        """Perform forward propagation and loss calculation of the panoptic
+        head on the features of the upstream network.
+
+        Args:
+            x (tuple[Tensor]): Multi-level features from the upstream
+                network, each is a 4D-tensor.
+            batch_data_samples (List[:obj:`DetDataSample`]): The Data
+                Samples. It usually includes information such as
+                `gt_instance`, `gt_panoptic_seg` and `gt_sem_seg`.
+
+        Returns:
+            dict[str, Tensor]: a dictionary of loss components
+        """
+
+        if self.train_cfg.get('merge_instance', False):
+            for data_sample in batch_data_samples:
+                gt_instances = data_sample.gt_instances
+                merged_masks = gt_instances.masks.merge()
+                new_gt_instances = InstanceData(
+                    labels=gt_instances['labels'][:1],
+                    masks=merged_masks
+                )
+                data_sample.gt_instances = new_gt_instances
+
+        batch_img_metas = []
+        batch_gt_instances = []
+        batch_gt_semantic_segs = []
+        for data_sample in batch_data_samples:
+            batch_img_metas.append(data_sample.metainfo)
+            batch_gt_instances.append(data_sample.gt_instances)
+            if 'gt_sem_seg' in data_sample:
+                batch_gt_semantic_segs.append(data_sample.gt_sem_seg)
+            else:
+                batch_gt_semantic_segs.append(None)
+
+        # forward
+        all_cls_scores, all_mask_preds = self(x, batch_data_samples)
+
+        # preprocess ground truth
+        batch_gt_instances = self.preprocess_gt(batch_gt_instances,
+                                                batch_gt_semantic_segs)
+
+        # loss
+        losses = self.loss_by_feat(all_cls_scores, all_mask_preds,
+                                   batch_gt_instances, batch_img_metas)
+
+        return losses

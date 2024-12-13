@@ -31,6 +31,8 @@ from .guided_anchor_head import FeatureAdaption, GuidedAnchorHead
 from .lad_head import LADHead
 from .ld_head import LDHead
 from .mask2former_head import Mask2FormerHead
+from .st_mask2former_head import STMask2FormerHead
+from .st_mask2former_head_v2 import STMask2FormerHeadV2
 from .mask2former_head_v2 import Mask2FormerHeadV2
 from .maskformer_head import MaskFormerHead
 from .nasfcos_head import NASFCOSHead
@@ -41,6 +43,9 @@ from .reppoints_head import RepPointsHead
 from .retina_head import RetinaHead
 from .retina_sepbn_head import RetinaSepBNHead
 from .rpn_head import RPNHead
+from .st_rpn_head import STRPNHead
+from .st_mmd_rpn_head import STMMDRPNHead
+from .st_rotated_rpn_head import STRotatedRPNHead
 from .rtmdet_head import RTMDetHead, RTMDetSepBNHead
 from .rtmdet_ins_head import RTMDetInsHead, RTMDetInsSepBNHead
 from .sabl_retina_head import SABLRetinaHead
@@ -96,5 +101,5 @@ __all__ = [
     'PolygonizerHeadV6', 'PolygonizerHeadV7', 'PolygonizerHeadV8', 'PolygonizerHeadV9',
     'PolygonizerHeadV10', 'PolygonizerHeadV11', 'PolygonizerHeadV12', 'PolygonizerHeadV13',
     'PolygonizerHeadV14', 'PolygonizerHeadV15', 'PolygonizerHeadV17', 'PolygonizerHeadV18',
-    'PolygonizerHeadV19', 'PolygonizerHeadV20', 'Mask2FormerHeadV2'
+    'PolygonizerHeadV19', 'PolygonizerHeadV20', 'Mask2FormerHeadV2', 'STRPNHead', 'STMMDRPNHead'
 ]

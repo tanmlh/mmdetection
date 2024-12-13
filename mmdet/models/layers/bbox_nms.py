@@ -4,6 +4,7 @@ from typing import Optional, Tuple, Union
 import torch
 from mmcv.ops.nms import batched_nms
 from torch import Tensor
+import pdb
 
 from mmdet.structures.bbox import bbox_overlaps
 from mmdet.utils import ConfigType
@@ -112,7 +113,8 @@ def fast_nms(
     score_thr: float,
     iou_thr: float,
     top_k: int,
-    max_num: int = -1
+    max_num: int = -1,
+    return_idx: bool = False
 ) -> Union[Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tensor]]:
     """Fast NMS in `YOLACT <https://arxiv.org/abs/1904.02689>`_.
 
@@ -181,4 +183,8 @@ def fast_nms(
     coeffs = coeffs[idx]
 
     cls_dets = torch.cat([boxes, scores[:, None]], dim=1)
+
+    if return_idx:
+        return cls_dets, classes, coeffs, idx
+
     return cls_dets, classes, coeffs

@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import copy
 from typing import List, Optional, Tuple
+import pdb
 
 import torch
 import torch.nn as nn
@@ -128,6 +129,7 @@ class RPNHead(AnchorHead):
             batch_gt_instances,
             batch_img_metas,
             batch_gt_instances_ignore=batch_gt_instances_ignore)
+
         return dict(
             loss_rpn_cls=losses['loss_cls'], loss_rpn_bbox=losses['loss_bbox'])
 

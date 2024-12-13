@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import Dict, List, Optional, Tuple, Union
 
+import warnings
 from datetime import datetime
 import os
 import cv2
@@ -25,6 +26,12 @@ from ..registry import VISUALIZERS
 from ..structures import DetDataSample
 from ..structures.mask import BitmapMasks, PolygonMasks, bitmap_to_polygon
 from .palette import _get_adaptive_scales, get_palette, jitter_color
+
+from mmengine.visualization.utils import (check_type, check_type_and_length,
+                                          color_str2rgb, color_val_matplotlib,
+                                          convert_overlay_heatmap,
+                                          img_from_canvas, tensor2ndarray,
+                                          value2list, wait_continue)
 
 
 @VISUALIZERS.register_module()
@@ -95,7 +102,8 @@ class TanmlhVisualizer(Visualizer):
                                             Tuple[int]]] = (200, 200, 200),
                  mask_color: Optional[Union[str, Tuple[int]]] = None,
                  line_width: Union[int, float] = 3,
-                 alpha: float = 0.8) -> None:
+                 alpha: float = 0.8,
+                 draw_bbox=True) -> None:
         super().__init__(
             name=name,
             image=image,
@@ -106,6 +114,7 @@ class TanmlhVisualizer(Visualizer):
         self.mask_color = mask_color
         self.line_width = line_width
         self.alpha = alpha
+        self.draw_bbox = draw_bbox
         # Set default value. When calling
         # `DetLocalVisualizer().dataset_meta=xxx`,
         # it will override the default value.
@@ -129,7 +138,7 @@ class TanmlhVisualizer(Visualizer):
         """
         self.set_image(image)
 
-        if 'bboxes' in instances and instances.bboxes.sum() > 0:
+        if 'bboxes' in instances and instances.bboxes.sum() > 0 and self.draw_bbox:
             bboxes = instances.bboxes
             labels = instances.labels
 
@@ -141,6 +150,7 @@ class TanmlhVisualizer(Visualizer):
                 else self.bbox_color
             bbox_palette = get_palette(bbox_color, max_label + 1)
             colors = [bbox_palette[label] for label in labels]
+
             self.draw_bboxes(
                 bboxes,
                 edge_colors=colors,
@@ -483,6 +493,7 @@ class TanmlhVisualizer(Visualizer):
                 pred_instances = data_sample.pred_instances
                 pred_instances = pred_instances[
                     pred_instances.scores > pred_score_thr]
+
                 pred_img_data = self._draw_instances(image, pred_instances,
                                                      classes, palette)
 
@@ -495,13 +506,13 @@ class TanmlhVisualizer(Visualizer):
                         self.add_image('pred_poly', vis_poly, step)
 
                 if draw_gt and 'gt_instances' in data_sample:
-                    try:
-                        vis_gt_poly = self._vis_poly(image, data_sample.gt_instances.masks.to_json())
-                        if vis_gt_poly is not None:
-                            pred_img_data = np.concatenate((pred_img_data, vis_gt_poly), axis=1)
-                            self.add_image('gt_poly', vis_gt_poly, step)
-                    except:
-                        pdb.set_trace()
+                    # try:
+                    vis_gt_poly = self._vis_poly(image, data_sample.gt_instances.masks.to_json())
+                    if vis_gt_poly is not None:
+                        pred_img_data = np.concatenate((pred_img_data, vis_gt_poly), axis=1)
+                        self.add_image('gt_poly', vis_gt_poly, step)
+                    # except:
+                    #     pdb.set_trace()
 
 
             if 'poly_reg_targets' in data_sample:
@@ -527,11 +538,10 @@ class TanmlhVisualizer(Visualizer):
                 pred_img_data = np.concatenate((pred_img_data, vert_featmap), axis=1)
 
 
-            """
             if 'pred_sem_seg' in data_sample:
-                pred_img_data = self._draw_sem_seg(pred_img_data,
-                                                   data_sample.pred_sem_seg,
-                                                   classes, palette)
+                vis_sem_seg = self._draw_sem_seg(image, data_sample.pred_sem_seg, classes, palette)
+                pred_img_data = np.concatenate((pred_img_data, vis_sem_seg), axis=1)
+            """
 
             if 'pred_panoptic_seg' in data_sample:
                 assert classes is not None, 'class information is ' \
@@ -565,8 +575,6 @@ class TanmlhVisualizer(Visualizer):
             mmcv.imwrite(drawn_img[..., ::-1], out_file)
         else:
             self.add_image(name, drawn_img, step)
-
-
 
     def _vis_poly(self, img, polygons, alpha_face=0.2, alpha_edge=0.5, alpha_point=1., alpha=0.0):
         H, W, C = img.shape
@@ -614,17 +622,28 @@ class TanmlhVisualizer(Visualizer):
         point_colors[:,-1] = alpha_point
         # edge_colors = np.array([[0.,0.,1.,.5]] * len(colors))
 
-        ax = gdf.plot(color=face_colors, edgecolor=edge_colors, linewidth=W // 2)
+        ax = gdf.plot(color=face_colors, edgecolor=edge_colors, linewidth=1)
         # ax = gdf.plot(color=face_colors, edgecolor=edge_colors, linewidth=W // 4)
         ax.imshow(img)
 
         for i, polygon in enumerate(polygons):
-            rings = [polygon.exterior, *polygon.interiors]
+            if polygon.geom_type == 'Polygon':
+                rings = [polygon.exterior, *polygon.interiors]
+            elif polygon.geom_type == 'MultiPolygon':
+                rings_list = []
+                for poly in polygon.geoms:
+                    rings = [poly.exterior, *poly.interiors]
+                    rings_list.extend(rings)
+
+                rings = rings_list
+            else:
+                pdb.set_trace()
+
             coords = [ring.xy for ring in rings]
             for xi, yi in coords:
                 # ax.plot(xi[:-1], yi[:-1], marker="o", color='blue', markersize=W // 2)
                 # ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=W)
-                ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=W // 3 * 2)
+                ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=2)
                 # ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=W//2)
                 # ax.plot(xi[:3], yi[:3], marker="o", color='red', markersize=W)
                 # ax.plot(xi[4:7], yi[4:7], marker="o", color='green', markersize=W)
@@ -638,11 +657,11 @@ class TanmlhVisualizer(Visualizer):
         ax.invert_yaxis()
 
         fig = ax.figure
-        fig.set_size_inches(H, W)  # Change the size of the figure
+        fig.set_size_inches(10.24, 10.24)  # Change the size of the figure
 
         # plt.tight_layout(pad=0)
         temp_name = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        plt.savefig(f'.{temp_name}.png', dpi=9)
+        plt.savefig(f'.{temp_name}.png', dpi=100)
         vis_img = cv2.imread(f'.{temp_name}.png')
         os.remove(f'.{temp_name}.png')
 
@@ -660,6 +679,79 @@ class TanmlhVisualizer(Visualizer):
         plt.close()
         return vis_img
 
+    def draw_bboxes(
+        self,
+        bboxes: Union[np.ndarray, torch.Tensor],
+        edge_colors: Union[str, tuple, List[str], List[tuple]] = 'g',
+        line_styles: Union[str, List[str]] = '-',
+        line_widths: Union[Union[int, float], List[Union[int, float]]] = 2,
+        face_colors: Union[str, tuple, List[str], List[tuple]] = 'none',
+        alpha: Union[int, float] = 0.8,
+    ) -> 'Visualizer':
+        """Draw single or multiple bboxes.
+
+        Args:
+            bboxes (Union[np.ndarray, torch.Tensor]): The bboxes to draw with
+                the format of(x1,y1,x2,y2).
+            edge_colors (Union[str, tuple, List[str], List[tuple]]): The
+                colors of bboxes. ``colors`` can have the same length with
+                lines or just single value. If ``colors`` is single value, all
+                the lines will have the same colors. Refer to `matplotlib.
+                colors` for full list of formats that are accepted.
+                Defaults to 'g'.
+            line_styles (Union[str, List[str]]): The linestyle
+                of lines. ``line_styles`` can have the same length with
+                texts or just single value. If ``line_styles`` is single
+                value, all the lines will have the same linestyle.
+                Reference to
+                https://matplotlib.org/stable/api/collections_api.html?highlight=collection#matplotlib.collections.AsteriskPolygonCollection.set_linestyle
+                for more details. Defaults to '-'.
+            line_widths (Union[Union[int, float], List[Union[int, float]]]):
+                The linewidth of lines. ``line_widths`` can have
+                the same length with lines or just single value.
+                If ``line_widths`` is single value, all the lines will
+                have the same linewidth. Defaults to 2.
+            face_colors (Union[str, tuple, List[str], List[tuple]]):
+                The face colors. Defaults to None.
+            alpha (Union[int, float]): The transparency of bboxes.
+                Defaults to 0.8.
+        """
+        check_type('bboxes', bboxes, (np.ndarray, torch.Tensor))
+
+        if len(bboxes.shape) == 1:
+            bboxes = bboxes[None]
+
+        if bboxes.shape[-1] == 4:
+            bboxes = tensor2ndarray(bboxes)
+            assert (bboxes[:, 0] <= bboxes[:, 2]).all() and (bboxes[:, 1] <=
+                                                             bboxes[:, 3]).all()
+            if not self._is_posion_valid(bboxes.reshape((-1, 2, 2))):
+                warnings.warn(
+                    'Warning: The bbox is out of bounds,'
+                    ' the drawn bbox may not be in the image', UserWarning)
+            poly = np.stack(
+                (bboxes[:, 0], bboxes[:, 1], bboxes[:, 2], bboxes[:, 1],
+                 bboxes[:, 2], bboxes[:, 3], bboxes[:, 0], bboxes[:, 3]),
+                axis=-1).reshape(-1, 4, 2)
+            poly = [p for p in poly]
+        elif bboxes.shape[-1] == 5:
+            # rotated boxes
+            from mmdet.structures.bbox import mmrotate_transforms
+            poly = mmrotate_transforms.obb2poly(bboxes, 'oc').reshape(-1,4,2)
+            poly = tensor2ndarray(poly)
+            poly = [p for p in poly]
+
+        else:
+            raise ValueError('The format of bbox should either be in (x1,y1,x2,y2) or (cx,cy,w,h,a)')
+
+        return self.draw_polygons(
+            poly,
+            alpha=alpha,
+            edge_colors=edge_colors,
+            line_styles=line_styles,
+            line_widths=line_widths,
+            face_colors=face_colors)
+
 def random_color(seed):
     """Random a color according to the input seed."""
     if sns is None:
@@ -670,3 +762,4 @@ def random_color(seed):
     color = colors[np.random.choice(range(len(colors)))]
     color = tuple([int(255 * c) for c in color])
     return color
+

@@ -241,4 +241,5 @@ class TwoStageDetector(BaseDetector):
 
         batch_data_samples = self.add_pred_to_datasample(
             batch_data_samples, results_list)
+
         return batch_data_samples

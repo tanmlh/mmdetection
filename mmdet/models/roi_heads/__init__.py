@@ -22,7 +22,11 @@ from .scnet_roi_head import SCNetRoIHead
 from .shared_heads import ResLayer
 from .sparse_roi_head import SparseRoIHead
 from .standard_roi_head import StandardRoIHead
+from .st_roi_head import STRoIHead
+from .st_poly_roi_head import STPolyRoIHead
+from .st_rotated_roi_head import STRotatedRoIHead
 from .trident_roi_head import TridentRoIHead
+from .poly_heads import FCNPolyHead
 
 __all__ = [
     'BaseRoIHead', 'CascadeRoIHead', 'DoubleHeadRoIHead', 'MaskScoringRoIHead',
@@ -34,5 +38,6 @@ __all__ = [
     'SingleRoIExtractor', 'PISARoIHead', 'PointRendRoIHead', 'MaskPointHead',
     'CoarseMaskHead', 'DynamicRoIHead', 'SparseRoIHead', 'TridentRoIHead',
     'SCNetRoIHead', 'SCNetMaskHead', 'SCNetSemanticHead', 'SCNetBBoxHead',
-    'FeatureRelayHead', 'GlobalContextHead', 'MultiInstanceRoIHead'
+    'FeatureRelayHead', 'GlobalContextHead', 'MultiInstanceRoIHead',
+    'STRoIHead', 'STRotatedRoIHead', 'FCNPolyHead', 'STPolyRoIHead'
 ]

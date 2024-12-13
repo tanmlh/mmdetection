@@ -37,6 +37,7 @@ from .youtube_vis_dataset import YouTubeVISDataset
 from .crowd_ai import CrowdAIDataset
 from .whu_mix_vector import WHUMixVectorDataset
 from .inria_vector import InriaVectorDataset
+from .planet_basemap import PlanetBasemapDataset
 
 __all__ = [
     'XMLDataset', 'CocoDataset', 'DeepFashionDataset', 'VOCDataset',
@@ -53,5 +54,5 @@ __all__ = [
     'ADE20KInstanceDataset', 'iSAIDDataset', 'V3DetDataset', 'ConcatDataset',
     'ODVGDataset', 'MDETRStyleRefCocoDataset', 'DODDataset',
     'CustomSampleSizeSampler', 'Flickr30kDataset', 'CrowdAIDataset', 'WHUMixVectorDataset',
-    'InriaVectorDataset'
+    'InriaVectorDataset', 'PlanetBasemapDataset'
 ]

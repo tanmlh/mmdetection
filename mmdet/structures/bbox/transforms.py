@@ -496,3 +496,22 @@ def bbox_cxcyah_to_xyxy(bboxes: torch.Tensor) -> torch.Tensor:
     w = ratio * h
     x1y1x2y2 = [cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0]
     return torch.cat(x1y1x2y2, dim=-1)
+
+def norm_angle(angle, angle_range):
+    """Limit the range of angles.
+
+    Args:
+        angle (ndarray): shape(n, ).
+        angle_range (Str): angle representations.
+
+    Returns:
+        angle (ndarray): shape(n, ).
+    """
+    if angle_range == 'oc':
+        return angle
+    elif angle_range == 'le135':
+        return (angle + np.pi / 4) % np.pi - np.pi / 4
+    elif angle_range == 'le90':
+        return (angle + np.pi / 2) % np.pi - np.pi / 2
+    else:
+        print('Not yet implemented.')

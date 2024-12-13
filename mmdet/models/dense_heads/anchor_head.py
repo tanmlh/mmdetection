@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import warnings
 from typing import List, Optional, Tuple, Union
+import pdb
 
 import torch
 import torch.nn as nn
@@ -249,12 +250,11 @@ class AnchorHead(BaseDenseHead):
         anchors = flat_anchors[inside_flags]
 
         pred_instances = InstanceData(priors=anchors)
-        assign_result = self.assigner.assign(pred_instances, gt_instances,
-                                             gt_instances_ignore)
+        assign_result = self.assigner.assign(pred_instances, gt_instances, gt_instances_ignore)
+
         # No sampling is required except for RPN and
         # Guided Anchoring algorithms
-        sampling_result = self.sampler.sample(assign_result, pred_instances,
-                                              gt_instances)
+        sampling_result = self.sampler.sample(assign_result, pred_instances, gt_instances)
 
         num_valid_anchors = anchors.shape[0]
         target_dim = gt_instances.bboxes.size(-1) if self.reg_decoded_bbox \
@@ -273,6 +273,7 @@ class AnchorHead(BaseDenseHead):
         # `bbox_coder.encode` accepts tensor or box type inputs and generates
         # tensor targets. If regressing decoded boxes, the code will convert
         # box type `pos_bbox_targets` to tensor.
+
         if len(pos_inds) > 0:
             if not self.reg_decoded_bbox:
                 pos_bbox_targets = self.bbox_coder.encode(
@@ -450,9 +451,8 @@ class AnchorHead(BaseDenseHead):
         target_dim = bbox_targets.size(-1)
         bbox_targets = bbox_targets.reshape(-1, target_dim)
         bbox_weights = bbox_weights.reshape(-1, target_dim)
-        bbox_pred = bbox_pred.permute(0, 2, 3,
-                                      1).reshape(-1,
-                                                 self.bbox_coder.encode_size)
+        bbox_pred = bbox_pred.permute(0, 2, 3, 1).reshape(-1, self.bbox_coder.encode_size)
+
         if self.reg_decoded_bbox:
             # When the regression loss (e.g. `IouLoss`, `GIouLoss`)
             # is applied directly on the decoded bounding boxes, it

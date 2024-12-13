@@ -1,10 +1,13 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from multiprocessing import Pool
+import pdb
 
 import numpy as np
 from mmengine.logging import print_log
 from mmengine.utils import is_str
+from mmdet.structures.mask import PolygonMasks
 from terminaltables import AsciiTable
+from mmdet.utils import tanmlh_polygon_utils as polygon_utils
 
 from .bbox_overlaps import bbox_overlaps
 from .class_names import get_classes
@@ -490,13 +493,37 @@ def get_cls_results(det_results, annotations, class_id):
     cls_gts_ignore = []
     for ann in annotations:
         gt_inds = ann['labels'] == class_id
-        cls_gts.append(ann['bboxes'][gt_inds, :])
+        # cls_gts.append(ann['bboxes'][gt_inds, :])
+        cls_gts.append(ann['bboxes'][gt_inds])
 
         if ann.get('labels_ignore', None) is not None:
             ignore_inds = ann['labels_ignore'] == class_id
-            cls_gts_ignore.append(ann['bboxes_ignore'][ignore_inds, :])
+            # cls_gts_ignore.append(ann['bboxes_ignore'][ignore_inds, :])
+            cls_gts_ignore.append(ann['bboxes_ignore'][ignore_inds])
         else:
             cls_gts_ignore.append(np.empty((0, 4), dtype=np.float32))
+
+    return cls_dets, cls_gts, cls_gts_ignore
+
+def get_cls_poly_results(det_results, annotations, class_id):
+    """Get det results and gt information of a certain class.
+
+    Args:
+        det_results (list[list]): Same as `eval_map()`.
+        annotations (list[dict]): Same as `eval_map()`.
+        class_id (int): ID of a specific class.
+
+    Returns:
+        tuple[list[np.ndarray]]: detected bboxes, gt bboxes, ignored gt bboxes
+    """
+    cls_dets = [img_res[class_id] for img_res in det_results]
+    cls_gts = []
+    cls_gts_ignore = []
+    for ann in annotations:
+        gt_inds = ann['labels'] == class_id
+        # cls_gts.append(ann['bboxes'][gt_inds, :])
+        cls_gts.append([ann['segmentations'][gt_ind] for gt_ind in gt_inds])
+        cls_gts_ignore.append([])
 
     return cls_dets, cls_gts, cls_gts_ignore
 
@@ -520,6 +547,210 @@ def get_cls_group_ofs(annotations, class_id):
             gt_group_ofs.append(np.empty((0, 1), dtype=bool))
 
     return gt_group_ofs
+
+def tpfp_poly(det_polys,
+              det_scores,
+              gt_polys,
+              iou_thr=0.5, **kwargs):
+    """Check if detected bboxes are true positive or false positive.
+
+    Args:
+        det_bbox (ndarray): Detected bboxes of this image, of shape (m, 5).
+        gt_bboxes (ndarray): GT bboxes of this image, of shape (n, 4).
+        gt_bboxes_ignore (ndarray): Ignored gt bboxes of this image,
+            of shape (k, 4). Defaults to None
+        iou_thr (float): IoU threshold to be considered as matched.
+            Defaults to 0.5.
+        area_ranges (list[tuple] | None): Range of bbox areas to be
+            evaluated, in the format [(min1, max1), (min2, max2), ...].
+            Defaults to None.
+        use_legacy_coordinate (bool): Whether to use coordinate system in
+            mmdet v1.x. which means width, height should be
+            calculated as 'x2 - x1 + 1` and 'y2 - y1 + 1' respectively.
+            Defaults to False.
+
+    Returns:
+        tuple[np.ndarray]: (tp, fp) whose elements are 0 and 1. The shape of
+        each array is (num_scales, m).
+    """
+
+
+    num_dets = len(det_polys)
+    num_gts = len(gt_polys)
+
+    area_ranges = [(None, None)]
+    num_scales = len(area_ranges)
+    # tp and fp are of shape (num_scales, num_gts), each row is tp or fp of
+    # a certain scale
+    tp = np.zeros((num_scales, num_dets), dtype=np.float32)
+    fp = np.zeros((num_scales, num_dets), dtype=np.float32)
+
+    # if there is no gt bboxes in this image, then all det bboxes
+    # within area range are false positives
+    if num_gts == 0:
+        fp[...] = 1
+        return tp, fp
+
+    ious = polygon_utils.poly_overlaps(
+        det_polys, gt_polys
+    )
+    # for each det, the max iou with all gts
+    ious_max = ious.max(axis=1)
+    # for each det, which gt overlaps most with it
+    ious_argmax = ious.argmax(axis=1)
+    # sort all dets in descending order by scores
+    sort_inds = np.argsort(-det_scores)
+
+    for k, (min_area, max_area) in enumerate(area_ranges):
+
+        gt_covered = np.zeros(num_gts, dtype=bool)
+        # if no area range is specified, gt_area_ignore is all False
+        # gt_area_ignore = np.zeros_like(gt_ignore_inds, dtype=bool)
+
+        for i in sort_inds:
+            if ious_max[i] >= iou_thr:
+                matched_gt = ious_argmax[i]
+                # if not (gt_ignore_inds[matched_gt] or gt_area_ignore[matched_gt]):
+                if not gt_covered[matched_gt]:
+                    gt_covered[matched_gt] = True
+                    tp[k, i] = 1
+                else:
+                    fp[k, i] = 1
+                # otherwise ignore this detected bbox, tp = 0, fp = 0
+            elif min_area is None:
+                fp[k, i] = 1
+            else:
+                pdb.set_trace()
+                bbox = det_bboxes[i, :4]
+                area = (bbox[2] - bbox[0] + extra_length) * (
+                    bbox[3] - bbox[1] + extra_length)
+                if area >= min_area and area < max_area:
+                    fp[k, i] = 1
+
+    return tp, fp
+
+
+
+def eval_poly_map(det_results, det_scores, annotations, iou_thr, nproc=4):
+
+    assert len(det_results) == len(det_scores)
+    assert len(det_results) == len(annotations)
+
+    num_imgs = len(det_results)
+    num_classes = len(det_results[0])  # positive class num
+
+    # There is no need to use multi processes to process
+    # when num_imgs = 1 .
+    if num_imgs > 1:
+        assert nproc > 0, 'nproc must be at least one.'
+        nproc = min(nproc, num_imgs)
+        pool = Pool(nproc)
+
+    eval_results = []
+    for i in range(num_classes):
+        # get gt and det bboxes of this class
+        cur_pred_polys = [PolygonMasks.from_json(det_result[i], 0, 0) for det_result in det_results]
+        cur_pred_scores = [det_score[i] for det_score in det_scores]
+        cur_gt_polys = [annotation['masks'] for annotation in annotations]
+
+        # choose proper function according to datasets to compute tp and fp
+        tpfp_fn = tpfp_poly
+
+        if num_imgs > 1e9:
+            # compute tp and fp for each image with multiple processes
+            args = []
+            if use_group_of:
+                # used in Open Images Dataset evaluation
+                gt_group_ofs = get_cls_group_ofs(annotations, i)
+                args.append(gt_group_ofs)
+                args.append([use_group_of for _ in range(num_imgs)])
+            if ioa_thr is not None:
+                args.append([ioa_thr for _ in range(num_imgs)])
+
+            tpfp = pool.starmap(
+                tpfp_fn,
+                zip(cls_dets, cls_gts, [iou_thr for _ in range(num_imgs)])
+            )
+        else:
+            tpfp = []
+            for pred_poly, pred_score, gt_poly in zip(cur_pred_polys, cur_pred_scores, cur_gt_polys):
+                cur_tpfp = tpfp_fn(
+                    pred_poly,
+                    pred_score,
+                    gt_poly,
+                    iou_thr,
+                )
+                tpfp.append(cur_tpfp)
+
+        # if use_group_of:
+        #     tp, fp, cls_dets = tuple(zip(*tpfp))
+        # else:
+        tp, fp = tuple(zip(*tpfp))
+
+        # calculate gt number of each scale
+        # ignored gts or gts beyond the specific scale are not counted
+        num_gts = np.zeros(1, dtype=int)
+        for j, _ in enumerate(cur_gt_polys):
+            num_gts[0] += len(_)
+
+        # sort all det bboxes by score, also sort tp and fp
+        # cls_scores = np.vstack(cur_pred_scores)
+        cls_scores = np.concatenate(cur_pred_scores)
+
+        num_dets = cls_scores.shape[0]
+        # sort_inds = np.argsort(-cls_scores[:, -1])
+        sort_inds = np.argsort(-cls_scores)
+        tp = np.hstack(tp)[:, sort_inds]
+        fp = np.hstack(fp)[:, sort_inds]
+        # calculate recall and precision with tp and fp
+        tp = np.cumsum(tp, axis=1)
+        fp = np.cumsum(fp, axis=1)
+        eps = np.finfo(np.float32).eps
+        recalls = tp / np.maximum(num_gts[:, np.newaxis], eps)
+        precisions = tp / np.maximum((tp + fp), eps)
+        # calculate AP
+        # if scale_ranges is None:
+        recalls = recalls[0, :]
+        precisions = precisions[0, :]
+        num_gts = num_gts.item()
+        ap = average_precision(recalls, precisions, 'area')
+        eval_results.append({
+            'num_gts': num_gts,
+            'num_dets': num_dets,
+            'recall': recalls,
+            'precision': precisions,
+            'ap': ap
+        })
+
+    # if num_imgs > 1:
+    #     pool.close()
+
+    # if scale_ranges is not None:
+    #     # shape (num_classes, num_scales)
+    #     all_ap = np.vstack([cls_result['ap'] for cls_result in eval_results])
+    #     all_num_gts = np.vstack(
+    #         [cls_result['num_gts'] for cls_result in eval_results])
+    #     mean_ap = []
+    #     for i in range(num_scales):
+    #         if np.any(all_num_gts[:, i] > 0):
+    #             mean_ap.append(all_ap[all_num_gts[:, i] > 0, i].mean())
+    #         else:
+    #             mean_ap.append(0.0)
+    # else:
+    aps = []
+    for cls_result in eval_results:
+        if cls_result['num_gts'] > 0:
+            aps.append(cls_result['ap'])
+
+    mean_ap = np.array(aps).mean().item() if aps else 0.0
+
+    # print_map_summary(
+    #     mean_ap, eval_results, dataset, area_ranges, logger=logger)
+    print_map_summary(mean_ap, eval_results)
+
+    return mean_ap, eval_results
+
+
 
 
 def eval_map(det_results,

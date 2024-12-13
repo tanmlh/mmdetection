@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import warnings
 from typing import List, Optional, Tuple
+import pdb
 
 import mmcv
 import numpy as np
@@ -395,6 +396,7 @@ class SOLOV2Head(SOLOHead):
                 mlvl_pos_masks.append(pos_mask)
                 mlvl_pos_indexes.append([])
                 continue
+
             hit_gt_bboxes = gt_bboxes[gt_inds]
             hit_gt_labels = gt_labels[gt_inds]
             hit_gt_masks = gt_masks[gt_inds, ...]
@@ -423,6 +425,7 @@ class SOLOV2Head(SOLOHead):
                 coord_h = int(
                     floordiv((center_h / upsampled_size[0]), (1. / num_grid),
                              rounding_mode='trunc'))
+
 
                 # left, top, right, down
                 top_box = max(
@@ -604,6 +607,7 @@ class SOLOV2Head(SOLOHead):
 
         loss_cls = self.loss_cls(
             flatten_cls_preds, flatten_labels, avg_factor=num_pos + 1)
+
         return dict(loss_mask=loss_mask, loss_cls=loss_cls)
 
     def predict_by_feat(self, mlvl_kernel_preds: List[Tensor],

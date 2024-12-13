@@ -140,8 +140,14 @@ class HungarianAssigner(BaseAssigner):
         # assign foregrounds based on matching results
         assigned_gt_inds[matched_row_inds] = matched_col_inds + 1
         assigned_labels[matched_row_inds] = gt_labels[matched_col_inds]
-        return AssignResult(
+
+        sum_cost = cost[matched_row_inds.cpu(), matched_col_inds.cpu()].sum()
+        assign_result = AssignResult(
             num_gts=num_gts,
             gt_inds=assigned_gt_inds,
             max_overlaps=None,
-            labels=assigned_labels)
+            labels=assigned_labels,
+        )
+        assign_result.set_extra_property('sum_cost', sum_cost)
+
+        return assign_result
