@@ -65,6 +65,8 @@ from .polyformer import PolyFormer
 from .polyformer_v2 import PolyFormerV2
 from .st_mask2former import STMask2Former
 from .st_mask2former_v2 import STMask2FormerV2
+from .seg_based_detector import SegBasedDetector
+from .seg_mask_rcnn import SegMaskRCNN
 
 __all__ = [
     'ATSS', 'BaseDetector', 'SingleStageDetector', 'TwoStageDetector', 'RPN',
@@ -79,5 +81,6 @@ __all__ = [
     'RTMDet', 'Detectron2Wrapper', 'CrowdDet', 'CondInst', 'BoxInst',
     'DetectionTransformer', 'ConditionalDETR', 'DINO', 'DABDETR', 'GLIP',
     'DDQDETR', 'GroundingDINO', 'PolyFormer', 'PolyFormerV2', 'STMaskRCNN',
-    'STMask2Former', 'STMask2FormerV2', 'STSOLOv2'
+    'STMask2Former', 'STMask2FormerV2', 'STSOLOv2', 'SegBasedDetector',
+    'SegMaskRCNN'
 ]

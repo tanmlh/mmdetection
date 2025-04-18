@@ -655,11 +655,6 @@ class STRPNHead(AnchorHead):
         outputs = unpack_gt_instances(batch_data_samples)
         (batch_gt_instances, batch_gt_instances_ignore, batch_img_metas) = outputs
 
-        if self.st_cfg.get('up_feat_level_1', False):
-            _, _, h, w = x[0].shape
-            new_x0 = F.interpolate(x[0], (h * 2, w * 2))
-            x = [new_x0, *x[1:]]
-
         if self.st_cfg.get('up_feat_levels', None) is not None:
             new_xs = []
             for level in self.st_cfg['up_feat_levels']:

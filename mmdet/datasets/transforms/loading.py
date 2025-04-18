@@ -514,6 +514,7 @@ class LoadAnnotations(MMCV_LoadAnnotations):
         else:
             # fake polygon masks will be ignored in `PackDetInputs`
             gt_masks = PolygonMasks([mask for mask in gt_masks], h, w)
+
         results['gt_masks'] = gt_masks
 
     def _load_seg_map(self, results: dict) -> None:
@@ -630,6 +631,21 @@ class LoadAnnotations(MMCV_LoadAnnotations):
         repr_str += f"imdecode_backend='{self.imdecode_backend}', "
         repr_str += f'backend_args={self.backend_args})'
         return repr_str
+
+@TRANSFORMS.register_module()
+class LoadSegFromPolygonMasks(BaseTransform):
+    def transform(self, results: dict) -> dict:
+        gt_sem_seg = results['gt_masks'].merge().to_ndarray().astype(np.int64)
+        # gt_sem_seg = results['gt_masks'].to_single_ndarray().astype(np.int64)
+        results['gt_seg_map'] = gt_sem_seg[0]
+
+        return results
+
+@TRANSFORMS.register_module()
+class PreLoadShapely(BaseTransform):
+    def transform(self, results: dict) -> dict:
+        results['data_samples'].gt_instances.masks.get_shapely()
+        return results
 
 
 @TRANSFORMS.register_module()

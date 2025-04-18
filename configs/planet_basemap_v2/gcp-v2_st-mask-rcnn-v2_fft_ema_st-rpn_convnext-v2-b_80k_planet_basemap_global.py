@@ -113,9 +113,6 @@ model = dict(
             num_classes=1,
             loss_mask=dict(
                 type='CrossEntropyLoss', use_mask=True, loss_weight=1.0)),
-        # poly_head=dict(
-        #     type='NaivePolyHead'
-        # ),
         poly_head=dict(
             type='DPPolygonizeHead',
             feat_channels=256,

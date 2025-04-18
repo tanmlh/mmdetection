@@ -1,0 +1,506 @@
+# Copyright (c) OpenMMLab. All rights reserved.
+import copy
+from typing import Dict, List, Optional, Tuple, Union
+import pdb
+import rasterio
+import shapely
+import numpy as np
+from rasterio.features import shapes
+import pycocotools.mask as mask_util
+import multiprocessing
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from mmcv.cnn import Conv2d
+from mmcv.ops import point_sample
+from mmengine.model import ModuleList, caffe2_xavier_init
+from mmengine.structures import InstanceData, PixelData
+from torch import Tensor
+
+from mmdet.registry import MODELS, TASK_UTILS
+import mmdet.utils.tanmlh_polygon_utils as polygon_utils
+from mmdet.models.layers import Mask2FormerTransformerDecoder, SinePositionalEncoding, PolyFormerTransformerDecoder
+from mmdet.models.utils import get_point_coords_around_ring, get_point_coords_around_ring_v2
+from mmdet.utils import ConfigType, OptConfigType, OptMultiConfig, reduce_mean, InstanceList, tanmlh_utils
+
+@MODELS.register_module()
+class GCPPolyHead(nn.Module):
+
+    def __init__(self, poly_cfg, in_feat_channels=2, decoder=None, feat_channels=256,
+                 loss_poly_reg=None, loss_poly_right_ang=None,
+                 loss_poly_ang=None):
+        super().__init__()
+
+        self.poly_cfg = poly_cfg
+
+        self.positional_encoding = SinePositionalEncoding(num_feats=128, normalize=True)
+        self.decoder = None
+        if decoder is not None:
+            self.decoder = Mask2FormerTransformerDecoder(**decoder)
+            self.num_decoder_layers = decoder.num_layers
+            self.poly_reg_head = nn.Sequential(
+                nn.Linear(feat_channels, feat_channels), nn.ReLU(inplace=True),
+                nn.Linear(feat_channels, feat_channels), nn.ReLU(inplace=True),
+                nn.Linear(feat_channels, 2)
+            )
+
+            self.poly_embed = nn.Linear(2, feat_channels)
+            self.poly_feat_embed = nn.Linear(in_feat_channels, feat_channels)
+            assigner=dict(
+                type='HungarianAssigner',
+                match_costs=[
+                    dict(type='PointL1Cost', weight=1.),
+                ],
+                solver='lapsolver'
+                # solver='scipy'
+            )
+            self.assigner = TASK_UTILS.build(assigner)
+            self.feat_channels = feat_channels
+
+            if loss_poly_reg is not None:
+                self.loss_poly_reg = MODELS.build(loss_poly_reg)
+
+            if loss_poly_right_ang is not None and self.poly_cfg.get('apply_right_angle_loss', False):
+                self.loss_poly_right_ang = MODELS.build(loss_poly_right_ang)
+
+            if loss_poly_ang is not None and self.poly_cfg.get('apply_angle_loss', False):
+                self.loss_poly_ang = MODELS.build(loss_poly_ang)
+
+    def loss(self, pred_jsons, gt_jsons, W, device='cpu', **kwargs):
+
+        assert len(pred_jsons) == len(gt_jsons)
+        N = self.poly_cfg.get('num_inter_points', 96)
+        K = len(pred_jsons)
+        num_iter = self.poly_cfg.get('num_iter', 1)
+
+        if self.poly_cfg.get('align_pred_gt', False) is True:
+            gt_jsons = polygon_utils.align_poly_json_pairs(pred_jsons, gt_jsons)
+
+        if K == 0:
+            # naive_poly = {'type': 'Polygon', 'coordinates': [[[-1,-1], [-1,0], [0,0], [0,-1], [-1,-1]]]}
+            # pred_jsons = [naive_poly]
+            # gt_jsons = [naive_poly]
+            # kwargs['batch_idxes'] = torch.zeros(1, dtype=torch.long)
+            dummy_loss = self.poly_embed.parameters().__next__()[:0].sum()
+            losses = dict(
+                loss_dp=dummy_loss,
+                loss_poly_reg=dummy_loss,
+            )
+            if self.poly_cfg.get('apply_right_angle_loss', False):
+                losses['loss_poly_right_ang'] = dummy_loss
+
+            if self.poly_cfg.get('apply_angle_loss', False):
+                losses['loss_poly_ang'] = dummy_loss
+
+            return losses
+
+        sampled_rings, _, _ = polygon_utils.sample_rings_from_json(
+            pred_jsons, interval=self.poly_cfg.get('step_size'), only_exterior=True,
+            num_min_bins=self.poly_cfg.get('num_min_bins', 8),
+            num_bins=self.poly_cfg.get('num_bins', None),
+            sample_type=self.poly_cfg.get('sample_type', 'interpolate')
+        )
+        sampled_segments, is_complete = polygon_utils.sample_segments_from_rings(sampled_rings, self.poly_cfg.get('num_inter_points'))
+
+        prim_reg_targets = torch.zeros(K, N, 2, device=device)
+        prim_cls_targets = torch.zeros(K, N, dtype=torch.long, device=device)
+
+        sampled_segments = sampled_segments.to(device)
+
+        prim_reg_pred = sampled_segments
+        for i in range(num_iter):
+            poly_pred_results = self.forward(prim_reg_pred, W, **kwargs)
+            prim_reg_pred = poly_pred_results['prim_reg_pred']
+
+
+        losses = dict()
+
+        match_idxes = []
+        seg_inds = []
+        matched_masks = []
+        dp_points = None
+        for i in range(K):
+
+            prim_target = self._get_poly_targets_single(
+                prim_reg_pred[i].detach().cpu(), gt_jsons[i],
+                sampled_segments=sampled_segments[i].cpu()
+            )
+            prim_reg_targets[i] = prim_target['prim_reg_targets']
+            prim_cls_targets[i] = prim_target['prim_cls_targets']
+
+            if 'seg_inds' in prim_target:
+                seg_inds.append(prim_target['seg_inds'])
+
+            if 'matched_mask' in prim_target:
+                matched_masks.append(prim_target['matched_mask'])
+
+            if is_complete[i]:
+                # seg_mask = (sampled_segments[i] >= 0).all(dim=-1)
+                # pred_poly = shapely.geometry.Polygon(sampled_segments[i][seg_mask].tolist())
+                # gt_poly = shapely.geometry.Polygon(gt_jsons[i]['coordinates'][0])
+                # iou = polygon_utils.polygon_iou(pred_poly, gt_poly)
+                # if iou > self.poly_cfg.get('align_iou_thre', 0.5):
+                match_idxes.append(i)
+
+        match_idxes = torch.tensor(match_idxes)
+
+        sizes = (prim_reg_pred >= 0).all(dim=-1).sum(dim=1)
+
+        # decoded_rings = polygon_utils.batch_decode_ring_dp(prim_reg_pred, sizes, max_step_size=64, lam=4, device=prim_reg_pred.device)
+        if self.poly_cfg.get('apply_right_angle_loss', False):
+            dp, dp_points = polygon_utils.batch_decode_ring_dp(
+                prim_reg_pred, sizes, max_step_size=sizes.max(),
+                lam=self.poly_cfg.get('lam', 4),
+                device=device, return_both=True,
+                result_device=device
+            )
+            dp_points = [x[:-1] for x in dp_points]
+        else:
+            dp = polygon_utils.batch_decode_ring_dp(
+                prim_reg_pred, sizes, max_step_size=sizes.max(),
+                lam=self.poly_cfg.get('lam', 4),
+                device=device, only_return_dp=True
+            )
+
+        opt_dis_comp = torch.gather(dp[is_complete], 2, sizes[is_complete].unsqueeze(1).unsqueeze(1).repeat(1,N,1)).min(dim=1)[0]
+        opt_dis_incomp = torch.gather(dp[~is_complete, 0], 1, sizes[~is_complete].unsqueeze(1)-1)
+        opt_dis = torch.cat([opt_dis_comp, opt_dis_incomp])
+        avg_factor = reduce_mean(opt_dis.new_tensor(len(opt_dis)))
+        losses['loss_dp'] = (opt_dis_comp.sum() + opt_dis_incomp.sum()) / K * self.poly_cfg.get('loss_weight_dp', 0.01)
+
+
+        # Polygon regression
+        A = prim_reg_pred.reshape(-1, 2)
+        B = prim_reg_targets.view(-1, 2)
+
+        if self.poly_cfg.get('reg_targets_type', 'vertice') == 'contour':
+            mask = (poly_pred >= 0).all(dim=-1).view(-1)
+            avg_factor = reduce_mean(A.new_tensor(mask.sum().item() * 2))
+            loss_poly_reg = self.loss_poly_reg(A[mask], B[mask], avg_factor=avg_factor)
+
+        elif self.poly_cfg.get('reg_targets_type', 'vertice') == 'vertice':
+            mask = (prim_reg_targets >= 0).all(dim=-1).view(-1)
+            avg_factor = reduce_mean(A.new_tensor(mask.sum().item() * 2))
+            loss_poly_reg = self.loss_poly_reg(A[mask], B[mask], avg_factor=avg_factor)
+        else:
+            raise ValueError()
+
+        losses['loss_poly_reg'] = loss_poly_reg
+
+        if self.poly_cfg.get('apply_right_angle_loss', False):
+            loss_right_ang = prim_reg_pred[:0].sum()
+
+            angles = []
+            gt_angles = []
+            eps = 1e-6
+            num_base_angles = self.poly_cfg.get('num_base_angles', 16)
+            base_angles = tanmlh_utils.generate_angles(num_base_angles).to(device)
+
+            # pred_points = dp_points
+            pred_points = [x[(x >= 0).all(dim=-1)] for x in prim_reg_pred]
+
+            for i, idx in enumerate(match_idxes):
+                if len(pred_points[idx]) >= 3:
+                    angle = tanmlh_utils.get_angles(pred_points[idx])
+                    gt_angle = tanmlh_utils.get_angles(torch.tensor(gt_jsons[idx]['coordinates'][0], device=device))
+
+                    angles.append(angle)
+                    gt_angles.append(gt_angle)
+
+            if len(angles) > 0:
+                # angles = torch.cat(angles)
+                sum_min_ang_dis_list = []
+                gt_ang_idx_list = []
+
+                for angle in gt_angles:
+                    diff = angle.view(-1,1,1) - base_angles.unsqueeze(0)
+                    d1 = (diff.abs() % (torch.pi * 2))
+                    d2 = 2 * torch.pi - (diff.abs() % (torch.pi * 2))
+                    min_ang_dis = torch.where(d1 < d2, d1, d2)
+
+                    gt_ang_idx = min_ang_dis.min(dim=-1)[0].sum(dim=0).argmin()
+                    gt_ang_idx_list.append(gt_ang_idx)
+
+                for j, angle in enumerate(angles):
+                    diff = angle.view(-1,1,1) - base_angles.unsqueeze(0)
+                    d1 = (diff.abs() % (torch.pi * 2))
+                    d2 = 2 * torch.pi - (diff.abs() % (torch.pi * 2))
+                    min_ang_dis = torch.where(d1 < d2, d1, d2)
+                    min_ang_dis[:, gt_ang_idx_list[j]].min(dim=-1)[0]
+
+                    sum_min_ang_dis = min_ang_dis[:, gt_ang_idx_list[j]].min(dim=-1)[0].mean()
+                    # sum_min_ang_dis = min_ang_dis.min(dim=-1)[0].sum(dim=0).min()
+
+                    sum_min_ang_dis_list.append(sum_min_ang_dis)
+
+                sum_min_ang_dis = torch.stack(sum_min_ang_dis_list)
+                loss_right_ang = self.loss_poly_right_ang(sum_min_ang_dis, torch.zeros_like(sum_min_ang_dis))
+                # loss_right_ang = self.loss_poly_right_ang(diffs, torch.zeros_like(diffs))
+
+            losses['loss_poly_right_ang'] = loss_right_ang
+
+        if self.poly_cfg.get('apply_angle_loss', False):
+            loss_ang = prim_reg_pred[:0].sum()
+            diffs = []
+            for i in range(K):
+                cur_inds = seg_inds[i]
+                cur_mask = matched_masks[i]
+                cur_pred = prim_reg_pred[i][cur_inds]
+
+                cur_target = prim_reg_targets[i][cur_inds]
+                cur_angle_mask = torch.zeros_like(cur_mask, device=cur_pred.device)
+                cur_angle_mask[1:-1] = cur_mask[:-2] & cur_mask[1:-1] & cur_mask[2:]
+
+                pred_angle, pred_angle_mask = polygon_utils.calculate_polygon_angles(cur_pred)
+                target_angle, target_angle_mask = polygon_utils.calculate_polygon_angles(cur_target)
+
+                cur_mask = cur_angle_mask & pred_angle_mask & target_angle_mask
+                # self.loss_poly_ang(pred_angle[cur_mask], target_angle[cur_mask])
+                if cur_mask.any():
+                    max_diff = (pred_angle[cur_mask] - target_angle[cur_mask]).abs().max()
+                    diffs.append(max_diff)
+
+            if len(diffs) > 0:
+                diffs = torch.stack(diffs)
+                avg_factor = reduce_mean(diffs.new_tensor(len(diffs)))
+                # loss_ang = self.loss_poly_ang(diffs, torch.zeros_like(diffs), avg_factor=avg_factor)
+                # loss_ang = torch.stack(diffs).mean() * self.loss_poly_ang.loss_weight
+                loss_ang = diffs.mean() * self.loss_poly_ang.loss_weight
+
+            losses['loss_poly_ang'] = loss_ang
+
+        return losses
+
+    def forward(self, poly_pred, W, mask_feat=None, query_feat=None, batch_idxes=None):
+
+        results = dict()
+
+        K, N, _ = poly_pred.shape
+        C = self.feat_channels
+
+        norm_poly_pred = (poly_pred / W - 0.5) * 2
+        poly_valid_mask = (poly_pred >= 0).all(dim=-1)
+
+        centerized_poly_pred = []
+        for cur_poly_pred in poly_pred:
+            cur_poly_mask = (cur_poly_pred >= 0).all(dim=-1)
+            # if cur_poly_mask.sum() == 0:
+            #     pdb.set_trace()
+
+            maxv = cur_poly_pred[cur_poly_pred[:,0] >= 0].max(dim=0)[0]
+            minv = cur_poly_pred[cur_poly_pred[:,0] >= 0].min(dim=0)[0]
+            max_w = (maxv - minv).max()
+            cent_pred = (cur_poly_pred -  minv[None]) / max_w
+            cent_pred = (cent_pred - 0.5) * 2
+            cent_pred[~cur_poly_mask] = -2
+            centerized_poly_pred.append(cent_pred)
+
+        centerized_poly_pred = torch.stack(centerized_poly_pred)
+        poly_feat = self.poly_embed(centerized_poly_pred).view(K, N, C)
+
+        if mask_feat is not None:
+            point_feat_list = []
+            b, c, h, w = mask_feat.shape
+
+
+            for i, cur_mask_feat in enumerate(mask_feat):
+                cur_norm_poly_pred = norm_poly_pred[batch_idxes == i].unsqueeze(0)
+                _, cur_K, cur_N, _ = cur_norm_poly_pred.shape
+
+                if self.poly_cfg.get('unfold_cfg', {}) != {}:
+                    unfold_cfg = self.poly_cfg['unfold_cfg']
+                    kernel_size = unfold_cfg.get('kernel_size', 7)
+                    cur_norm_poly_pred = polygon_utils.sample_neighborhood_points(
+                        cur_norm_poly_pred, kernel_size, 1
+                    ).view(1, cur_K, cur_N * kernel_size ** 2, 2)
+
+                    # unfolded = F.unfold(mask_feat, **unfold_cfg)
+                    # unfolded = unfolded.view(b, c*kernel_size**2, h, w)
+
+                point_feat = F.grid_sample(
+                    cur_mask_feat[None], cur_norm_poly_pred, align_corners=True
+                )
+                point_feat = point_feat.permute(0,2,3,1).squeeze(0)
+
+                if self.poly_cfg.get('unfold_cfg', {}) != {}:
+                    point_feat = point_feat.reshape(cur_K, cur_N, kernel_size**2 * c)
+
+                point_feat_list.append(point_feat)
+
+            point_feat = torch.cat(point_feat_list, dim=0)
+            point_feat = self.poly_feat_embed(point_feat)
+
+            poly_feat += point_feat
+
+            if self.poly_cfg.get('use_decoded_feat_in_poly_feat', False):
+                poly_feat += query_feat.detach().view(K, 1, C)
+
+        poly_pos_embed = self.positional_encoding(poly_feat.new_zeros(K, N, 1))
+        poly_pos_embed = poly_pos_embed.view(K, C, N).permute(0,2,1)
+        # poly_pos_embed += ((torch.arange(N, device=poly_pred.device) / N - 0.5) * 2).view(1,-1,1)
+
+        query_feat = poly_feat
+        query_embed = poly_pos_embed
+
+        prim_pred_reg_list = []
+        for i in range(self.num_decoder_layers):
+            layer = self.decoder.layers[i]
+            query_feat = layer(
+                query=query_feat,
+                key=poly_feat,
+                value=poly_feat,
+                query_pos=query_embed,
+                key_pos=poly_pos_embed,
+                cross_attn_mask=None,
+                query_key_padding_mask=None,
+                # here we do not apply masking on padded region
+                key_padding_mask=None)
+
+            if i == self.num_decoder_layers - 1:
+                prim_pred_reg = self.poly_reg_head(query_feat).view(K, N, -1)
+                prim_pred_reg_list.append(prim_pred_reg)
+
+        prim_pred_reg = prim_pred_reg_list[-1]
+        prim_pred_reg = poly_pred + prim_pred_reg * self.poly_cfg.get('max_offsets', 10)
+        prim_pred_reg = torch.clamp(prim_pred_reg, 0, W)
+        prim_pred_reg[(poly_pred < 0).all(dim=-1)] = -1
+
+        results['prim_reg_pred'] = prim_pred_reg
+
+        return results
+
+    def _get_poly_targets_single(self, poly_pred, poly_gt_json, sampled_segments,
+                                 assign_type='assigner'):
+
+        targets = {}
+
+        N = self.poly_cfg.get('num_inter_points', 96)
+        max_align_dis = self.poly_cfg.get('max_align_dis', 1e8)
+
+        prim_reg_targets = torch.zeros(N, 2) - 1
+        prim_cls_targets = torch.zeros(N, dtype=torch.long)
+        prim_ref_targets = torch.zeros(N, 2) - 1
+
+        K = (sampled_segments >= 0).all(dim=-1).sum()
+
+        poly_gt_torch = torch.tensor(poly_gt_json['coordinates'][0]).float() # use the exterior
+        if self.poly_cfg.get('add_gt_middle', False):
+            poly_gt_torch = polygon_utils.add_middle_points(poly_gt_torch)
+
+        if K == 0 or (poly_gt_torch == 0).all():
+            targets['prim_cls_targets'] = prim_cls_targets
+            targets['prim_reg_targets'] = prim_reg_targets
+            return targets
+
+        if assign_type == 'assigner':
+
+            gt_instances = InstanceData(
+                labels=torch.zeros(len(poly_gt_torch[:-1]), dtype=torch.long),
+                points=poly_gt_torch[:-1]
+            ) # (num_classes, N)
+
+            pred_instances = InstanceData(points=sampled_segments[:K])
+
+
+            assign_result = self.assigner.assign(
+                pred_instances=pred_instances,
+                gt_instances=gt_instances,
+                img_meta=None)
+
+            gt_inds = assign_result.gt_inds
+            seg_inds = gt_inds.nonzero().view(-1)
+            gt_inds = gt_inds[seg_inds]
+
+            dis = ((poly_gt_torch[gt_inds - 1] - sampled_segments[seg_inds]) ** 2).sum(dim=1) ** 0.5
+            max_align_dis = self.poly_cfg.get('max_align_dis', 1e8)
+            valid_mask = dis < max_align_dis
+
+            prim_reg_targets[seg_inds[valid_mask]] = poly_gt_torch[gt_inds[valid_mask] - 1]
+            prim_cls_targets[seg_inds[valid_mask]] = 1
+
+        targets['prim_cls_targets'] = prim_cls_targets
+        targets['prim_reg_targets'] = prim_reg_targets
+        targets['seg_inds'] = seg_inds
+        targets['matched_mask'] = valid_mask
+
+        return targets
+
+
+    def predict(self, poly_pred_jsons, W, mask_feat=None, batch_idxes=None, device='cpu',
+                return_format='coco'):
+
+        N = self.poly_cfg.get('num_inter_points', 96)
+        num_max_rings = self.poly_cfg.get('num_max_rings', 5000)
+
+        pred_results = {}
+
+        sampled_segs, seg_sizes, poly2segs_idxes, segs2poly_idxes = polygon_utils.sample_segments_from_json(
+            poly_pred_jsons, interval=self.poly_cfg.get('step_size'),
+            seg_len=N, stride=self.poly_cfg.get('stride_size', 64),
+            num_min_bins=self.poly_cfg.get('num_min_bins', 8),
+            num_bins=self.poly_cfg.get('num_bins', None),
+        )
+        sampled_segs = sampled_segs.astype(np.float32)
+
+
+        if len(sampled_segs) > 0:
+            poly_pred = torch.from_numpy(sampled_segs).to(device).float()
+
+            b, c, h, w = mask_feat.shape
+            # if self.poly_cfg.get('unfold_cfg', {}) != {}:
+            #     unfold_cfg = self.poly_cfg['unfold_cfg']
+            #     kernel_size = unfold_cfg.get('kernel_size', 7)
+            #     unfolded = F.unfold(mask_feat, **unfold_cfg)
+            #     unfolded = unfolded.view(b, c*kernel_size**2, h, w)
+            #     mask_feat = unfolded
+
+            poly_pred_list = poly_pred.split(num_max_rings)
+            segs2poly_idxes_list = torch.tensor(segs2poly_idxes[:,0]).split(num_max_rings)
+
+            prim_reg_pred_list = []
+            for i, (poly_pred, segs2poly_idxes) in enumerate(zip(poly_pred_list, segs2poly_idxes_list)):
+                dp_pred_results = self.forward(
+                    poly_pred, W, mask_feat=mask_feat,
+                    batch_idxes=batch_idxes[segs2poly_idxes] if batch_idxes is not None else None
+                )
+                prim_reg_pred = dp_pred_results['prim_reg_pred']
+                prim_reg_pred_list.append(prim_reg_pred)
+
+            prim_reg_pred = torch.cat(prim_reg_pred_list)
+            prim_cls_pred = torch.zeros_like(prim_reg_pred).cpu()
+
+
+            rings, poly2ring_idxes, others = polygon_utils.assemble_segments(
+                prim_reg_pred.cpu(), poly2segs_idxes, seg_sizes,
+                length=self.poly_cfg.get('num_inter_points', 96),
+                stride=self.poly_cfg.get('stride_size', 64),
+                prim_cls_pred=prim_cls_pred,
+                sampled_rings=sampled_segs
+            )
+
+            pred_results['pred_rings'] = rings
+            pred_results['sampled_rings'] = others['sampled_rings']
+
+            rings = [ring.to(poly_pred.device) for ring in rings]
+
+            simp_rings = polygon_utils.simplify_rings_dp(
+                rings, lam=self.poly_cfg.get('lam', 4), device=device,
+                ref_rings=sampled_rings if self.poly_cfg.get('use_ref_rings', False) else None,
+                drop_last=False, max_step_size=self.poly_cfg.get('max_step_size', 50)
+            )
+
+            simp_rings = [x[:-1] for x in simp_rings]
+
+            simp_polygons = polygon_utils.assemble_rings(
+                simp_rings, poly2ring_idxes, format=return_format
+            )
+
+            pred_results['simp_polygons'] = simp_polygons
+
+        else:
+            pred_results['simp_polygons'] = []
+
+        return pred_results
+
+

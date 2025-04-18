@@ -20,6 +20,7 @@ from .task_aligned_assigner import TaskAlignedAssigner
 from .topk_hungarian_assigner import TopkHungarianAssigner
 from .uniform_assigner import UniformAssigner
 from .hierarchical_assigner import HierarchicalAssigner
+from .poly_assigner import PolyAssigner
 
 __all__ = [
     'BaseAssigner', 'BinaryFocalLossCost', 'MaxIoUAssigner',
@@ -30,5 +31,5 @@ __all__ = [
     'ClassificationCost', 'CrossEntropyLossCost', 'DiceCost', 'FocalLossCost',
     'IoUCost', 'BboxOverlaps2D', 'DynamicSoftLabelAssigner',
     'MultiInstanceAssigner', 'BboxOverlaps2D_GLIP', 'PointL1Cost',
-    'HierarchicalAssigner'
+    'HierarchicalAssigner', 'PolyAssigner'
 ]

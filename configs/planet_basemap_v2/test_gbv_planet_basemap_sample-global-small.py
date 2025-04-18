@@ -178,11 +178,28 @@ model = dict(
             sem_seg_thr=0.5,
             eval_proposal=False
         ),
-        nms_cfg=dict(
-            # nms_type='none',
-            nms_type='no_overlap',
-            iou_thr=0.5
-        )
+        post_cfg = dict(
+            type='InstancePostProcessor',
+            out_size=(1024, 1024),
+            do_crop_to_boundary=True,
+            do_filter_large=False,
+            max_area = 1600,
+            # crop_box = (32 * 4, 32 * 4, (4096 + 32) * 4, (4096 + 32) * 4),
+            # crop_box = (0,0,4096*4,4096*4),
+            crop_box = (0,0,1024,1024),
+            do_merge_with_fg=False,
+            nms_cfg=dict(
+                nms_type='polygon',
+                iou_thr=0.8,
+                half_iou_thr1=0.1,
+                half_iou_thr2=0.0,
+            ),
+            out_cfg=dict(
+                save_results=False,
+                out_dir='./work_dirs/basemap_pred_results/st-mark-rcnn-v2_convnext-v2-b',
+                out_poly_scale=1/4.,
+            )
+        ),
     ))
 
 val_evaluator = [
@@ -191,11 +208,11 @@ val_evaluator = [
         # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_sample_europe2/coco_ann/upscale-global_quartely_2023q2.json',
         # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_full/upscale_test_global_quartely_2023q2.json',
         # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_full/upscale_merged_filtered_test_dp_global_quartely_2023q2.json',
-        ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
-        # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_global/test_continent_global_quartely_2023q2.json',
+        # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
+        ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_global/test_continent_global_quartely_2023q2.json',
         # metric=['bbox'],
         # metric=['map_fast', 'proposal_fast', 'bbox_fast'],
-        metric=['map_fast', 'bbox_fast'],
+        metric=['poly_ap_fast', 'map_fast', 'bbox_fast'],
         split_meta_key='continent',
         backend_args={{_base_.backend_args}},
         out_cfg=dict(

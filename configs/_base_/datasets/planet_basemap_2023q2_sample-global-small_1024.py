@@ -40,6 +40,7 @@ train_pipeline = [
     dict(type='RandomFlip', prob=0.5, direction='horizontal'),
     dict(type='RandomFlip', prob=0.5, direction='vertical'),
     dict(type='Rotate90', prob=0.75),
+    dict(type='LoadSegFromPolygonMasks'),
     # dict(type='CropFeaturesToBounds'),
     # dict(type='Normalize', **img_norm_cfg),
     # dict(type='Pad', size=crop_size, pad_val=0, seg_pad_val=0),
@@ -76,8 +77,6 @@ train_dataloader = dict(
         data_root=data_root,
         pipeline=train_pipeline,
         backend_args=backend_args,
-        # split='train'
-        # ann_file='8e089a94-555c-4d7b-8f2f-4d733aebb058_train/train/annotation.json',
         ann_file = 'coco_ann_full/small_train_global_quartely_2023q2.json',
         data_prefix=dict(img=''),
     )

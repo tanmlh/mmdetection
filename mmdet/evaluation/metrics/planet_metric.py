@@ -105,7 +105,7 @@ class PlanetMetric(BaseMetric):
         # coco evaluation metrics
         self.metrics = metric if isinstance(metric, list) else [metric]
         allowed_metrics = ['bbox', 'segm', 'proposal', 'proposal_fast', 'bbox_fast', 'map_fast',
-                           'poly_ap_fast', 'poly_fast']
+                           'poly_ap_fast', 'poly_fast', 'iou_ciou']
         for metric in self.metrics:
             if metric not in allowed_metrics:
                 raise KeyError(
@@ -405,6 +405,7 @@ class PlanetMetric(BaseMetric):
             result['labels'] = pred['labels'].cpu().numpy()
             # result['labels'] = np.zeros(len(pred['labels']))
             # if self.out_cfg.get('save_coco', False):
+
             if 'segmentations' in pred:
                 result['segmentations'] = pred['segmentations']
 
@@ -557,12 +558,19 @@ class PlanetMetric(BaseMetric):
                 fixed_dt_polygons = polygon_utils.fix_polygons(dt_polygons, buffer=0.0)
                 """
 
-                # mtas = polygon_utils.compute_polygon_contour_measures(fixed_dt_polygons, fixed_gt_polygons, sampling_spacing=2.0, min_precision=0.5, max_stretch=2)
 
                 # binary_mask = mask_util.decode(rles[6])
                 result['masks'] = rles
                 result['polygons'] = pred['segmentations']
-                # result['mtas'] = mtas
+
+            if self.calculate_mta:
+                dt_polygons = [shapely.geometry.shape(x) for x in pred['segmentations']]
+                gt_polygons = data_sample['gt_instances']['masks'].get_shapely()
+
+                mtas = polygon_utils.compute_polygon_contour_measures(dt_polygons, gt_polygons, sampling_spacing=2.0, min_precision=0.5, max_stretch=2)
+                num_pred_coords, num_gt_coords = polygon_utils.compute_polygon_simplicity_measures(dt_polygons, gt_polygons, min_precision=0.5)
+                result['mtas'] = mtas
+                result['num_pred_gt_coords'] = np.stack([np.array(num_pred_coords), np.array(num_gt_coords)], axis=1)
 
             # some detectors use different scores for bbox and mask
             if 'mask_scores' in pred:
@@ -664,6 +672,18 @@ class PlanetMetric(BaseMetric):
                 mean_mta = np.array(mtas).mean()
 
             logger.info(f'{key} MTA: {mean_mta}')
+            eval_results['MTA'] = mean_mta
+
+
+        if 'num_pred_gt_coords' in preds[0]:
+            num_pred_gt_coords = [pred['num_pred_gt_coords'] for pred in preds]
+            num_pred_gt_coords = np.concatenate(num_pred_gt_coords)
+            temp = num_pred_gt_coords.sum(axis=0)
+            poly_simp = temp[0] / temp[1]
+
+            logger.info(f'{key} Poly-Simp: {poly_simp}')
+            eval_results['Poly-Simp'] = poly_simp
+
 
         """
         tmp_dir = None
@@ -767,8 +787,8 @@ class PlanetMetric(BaseMetric):
                 )
                 eval_results['iou'] = np.array(ious).mean()
                 eval_results['c_iou'] = np.array(c_ious).mean()
-                eval_results['N_ratio'] = N_pairs[0] / N_pairs[1]
-                logger.info(f'iou: {eval_results["iou"]}, c_iou: {eval_results["c_iou"]}, N_ratio: {N_pairs[0] / N_pairs[1]}')
+                eval_results['vert_N_ratio'] = N_pairs[0] / N_pairs[1]
+                logger.info(f'iou: {eval_results["iou"]}, c_iou: {eval_results["c_iou"]}, vert_N_ratio: {N_pairs[0] / N_pairs[1]}')
                 continue
 
             """

@@ -9,6 +9,8 @@ def json_convert(path):
         coco_data['categories'].append({'id': 0, 'name': 'background'})
         coco_data['categories'] = sorted(
             coco_data['categories'], key=lambda x: x['id'])
+
+        pdb.set_trace()
         f.seek(0)
         json.dump(coco_data, f)
         f.truncate()

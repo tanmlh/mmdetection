@@ -48,12 +48,11 @@ class NaivePolyHead(BaseModule):
     def predict(self, poly_jsons, mask_size,  **kwargs):
         results = {}
         poly_shps = [shapely.geometry.shape(poly_json) for poly_json in poly_jsons]
-        simp_poly_shps = [poly.simplify(tolerance=1.5, preserve_topology=True) for poly in poly_shps]
+        # simp_poly_shps = [poly.simplify(tolerance=1.5, preserve_topology=True) for poly in poly_shps]
+        simp_poly_shps = poly_shps
         simp_poly_jsons = [shapely.geometry.mapping(poly) for poly in simp_poly_shps]
 
-
         results['simp_polygons'] = simp_poly_jsons
-
         return results
 
     def _predict_by_feat_single(self,

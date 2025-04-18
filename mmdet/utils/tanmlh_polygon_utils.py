@@ -35,9 +35,12 @@ from sklearn.cluster import DBSCAN
 from sklearn.linear_model import LinearRegression
 from sklearn.cluster import AffinityPropagation
 from scipy.optimize import linear_sum_assignment
+from scipy.sparse import lil_matrix, csr_matrix
 
 from skimage.measure import label as ski_label
 from skimage.measure import regionprops
+from mmdet.structures.bbox import bbox_overlaps, obb2xyxy
+
 
 def compute_overlap_matrix(boxes1, boxes2, mode='numpy'):
 
@@ -1762,6 +1765,41 @@ def compute_polygon_contour_measures(pred_polygons: list, gt_polygons: list, sam
                                for pred_polygon, gt_polygon in filtered_polygons]
                                # for pred_polygon, gt_polygon in tqdm(filtered_polygons, desc='Computing MTAs')]
     return half_tangent_max_angles
+
+def compute_polygon_simplicity_measures(pred_polygons: list, gt_polygons: list, min_precision: float):
+
+    assert isinstance(pred_polygons, list), "pred_polygons should be a list"
+    assert isinstance(gt_polygons, list), "gt_polygons should be a list"
+    if len(pred_polygons) == 0 or len(gt_polygons) == 0:
+        return [], []
+
+    assert isinstance(pred_polygons[0], shapely.geometry.Polygon), \
+        f"Items of pred_polygons should be of type shapely.geometry.Polygon, not {type(pred_polygons[0])}"
+    assert isinstance(gt_polygons[0], shapely.geometry.Polygon), \
+        f"Items of gt_polygons should be of type shapely.geometry.Polygon, not {type(gt_polygons[0])}"
+
+
+    # pred_bounds = np.array([polygon.bounds for polygon in pred_polygons])
+    gt_bounds = np.array([polygon.bounds for polygon in gt_polygons])
+
+    filtered_polygons = []
+    for pred_polygon in pred_polygons:
+        valid_inds = get_within_bounds_ids(pred_polygon.bounds, gt_bounds)
+        valid_gt_polygons = [gt_polygons[x] for x in valid_inds.nonzero()[0]]
+        for gt_polygon in valid_gt_polygons:
+            if min_precision < pred_polygon.intersection(gt_polygon).area / (pred_polygon.area + 1e-8):
+                filtered_polygons.append([pred_polygon, gt_polygon])
+                break
+
+    num_pred_coords = []
+    num_gt_coords = []
+    for pred_polygon, gt_polygon in filtered_polygons:
+        num_pred_coords.append(len(list(pred_polygon.exterior.coords)))
+        num_gt_coords.append(len(list(gt_polygon.exterior.coords)))
+
+    return num_pred_coords, num_gt_coords
+
+
 
 
 def fix_polygons(polygons, buffer=0.0):
@@ -3521,6 +3559,7 @@ def poly_json2coco(poly_json, scale=1.):
     return new_coords_list
 
 
+
 def worker(args):
     imgs, offset, clockwise, scale = args
     cur_shapes = shapes(imgs, mask=imgs > 0)
@@ -4163,7 +4202,7 @@ def clip_by_bound(poly, im_h, im_w):
     return np.concatenate((p_x[:, np.newaxis], p_y[:, np.newaxis]), axis=1)
 
 def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='per_mask',
-                    scores=None, return_idxes=False, return_multi_polygon=False):
+                    scores=None, return_idxes=False, return_multi_polygon=False, **kwargs):
 
     if mode == 'per_mask':
         N, H, W  = imgs.shape
@@ -4308,7 +4347,6 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
                 prop_mask = b_im
                 padded_binary_mask = np.pad(prop_mask, pad_width=1, mode='constant', constant_values=0)
                 contours, hierarchy = cv2.findContours(padded_binary_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-                # contours, hierarchy = cv2.findContours(padded_binary_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
 
                 if len(contours) > 1:
                     intp = []
@@ -4428,7 +4466,7 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
 
         return poly_jsons
 
-    elif mode == 'concat_mask_cv2':
+    elif mode == 'concat_mask_cv2_old':
 
         N, H, W = imgs.shape
         imgs = imgs * torch.arange(1, N+1, device=imgs.device, dtype=torch.int16).view(N, 1, 1)
@@ -4438,7 +4476,67 @@ def polygonize_mask(imgs, scale=4., sample_points=False, clockwise=True, mode='p
         # mask = imgs > 0
 
         return polygonize_mask(imgs, scale=scale, mode='cv2_single_mask')
- 
+
+    elif mode == 'concat_mask_cv2':
+        N, H, W = imgs.shape
+        padded_imgs = F.pad(imgs, ((1,1,1,1)))
+
+        padded_imgs = padded_imgs * torch.arange(1, N+1, device=imgs.device, dtype=torch.int16).view(N, 1, 1)
+        cat_imgs = torch.cat([img for img in padded_imgs], dim=0)
+        offsets = (torch.arange(N).unsqueeze(1) * torch.tensor([0, H + 2]).view(1,2) + 1).numpy()
+        polygons, colors = polygonize_mask(cat_imgs, mode='simple_mask_cv2')
+        sorted_colors, arg_sorted_colors = torch.sort(colors)
+        polygons = [polygons[x] for x in arg_sorted_colors]
+        polygons = [transform_polygon(polygon, -offsets[sorted_colors[i]-1]) for i, polygon in enumerate(polygons)]
+
+        return polygons, sorted_colors
+
+    elif mode == 'simple_mask_cv2':
+
+        H, W = imgs.shape
+        binary_mask = (imgs > 0).cpu().numpy()
+        polygons = []
+        colors = []
+
+        if binary_mask.sum() > 0:
+
+            contours, hierarchy = cv2.findContours(
+                binary_mask.astype(np.uint8),
+                cv2.RETR_CCOMP,
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+            hierarchy = hierarchy[0]
+
+            for i in range(len(contours)):
+                if hierarchy[i][3] == -1:  # Exterior contour
+                    exterior = contours[i].squeeze().astype(int)
+                    if len(exterior) < 3:
+                        continue
+
+                    # Get color from first exterior point [2,6](@ref)
+                    x, y = exterior[0]  # Contour point in (x,y) format
+                    color = imgs[y, x].item()  # Tensor uses (row,col) indexing
+
+                    # Collect interiors (original code)
+                    interiors = []
+                    j = hierarchy[i][2]
+                    while j != -1:
+                        hole = contours[j].squeeze().astype(int)
+                        if len(hole) >= 3:
+                            interiors.append(hole.tolist())
+                        j = hierarchy[j][0]
+
+                    # Build polygon structure
+                    polygons.append({
+                        'type': 'Polygon',
+                        'coordinates': [exterior.tolist(), *interiors]
+                    })
+                    colors.append(color)
+
+        return polygons, torch.tensor(colors, dtype=torch.long)
+
+
+
 
 
 def vis_data_wandb(data):
@@ -4625,30 +4723,67 @@ def create_grid(x_min, y_min, x_max, y_max, h, w):
 
     return np.array(grids)
 
-def poly_overlaps(polys_A, polys_B, grid_size=(1024, 1024), iou_type='iou'):
+def poly_overlaps(polys_A, polys_B, grid_size=(1024, 1024), iou_type='iou', bbox_iou_thr=0.0):
 
     def cal_iou(polygon1, polygon2, eps=1e-8):
+        if not polygon1.is_valid:
+            polygon1 = polygon1.buffer(1e-4)
+        if not polygon2.is_valid:
+            polygon2 = polygon2.buffer(1e-4)
+
         intersection = polygon1.intersection(polygon2)
         union = polygon1.union(polygon2)
         iou = intersection.area / (union.area + eps)
         return iou
 
     def cal_half_iou(polygon1, polygon2, eps=1e-8):
+        if not polygon1.is_valid:
+            polygon1 = polygon1.buffer(1e-4)
+        if not polygon2.is_valid:
+            polygon2 = polygon2.buffer(1e-4)
+
         intersection = polygon1.intersection(polygon2)
         # union = polygon1.union(polygon2)
         iou = intersection.area / (polygon1.area + eps)
         return iou
 
+    def cal_half_ioB(polygon1, polygon2, eps=1e-8):
+        if not polygon1.is_valid:
+            polygon1 = polygon1.buffer(1e-4)
+        if not polygon2.is_valid:
+            polygon2 = polygon2.buffer(1e-4)
+
+        intersection = polygon1.intersection(polygon2)
+        # union = polygon1.union(polygon2)
+        ioB = intersection.area / (polygon2.area + eps)
+        return ioB
+
+    def cal_fast_iou(polygon1, polygon2, eps=1e-8, tolerance=2.0):
+        polygon1 = polygon1.simplify(tolerance=tolerance)
+        polygon2 = polygon2.simplify(tolerance=tolerance)
+        return cal_iou(polygon1, polygon2, eps)
+
+
     if iou_type == 'iou':
         iou_fun = cal_iou
     elif iou_type == 'half_iou':
         iou_fun = cal_half_iou
+    elif iou_type == 'ioA':
+        iou_fun = cal_half_iou
+    elif iou_type == 'ioB':
+        iou_fun = cal_half_ioB
+    elif iou_type == 'fast_iou':
+        iou_fun = cal_fast_iou
+    else:
+        raise ValueError(f'iou_type {iou_type} is not supported')
 
     poly_shps_A = polys_A.get_shapely()
     poly_shps_B = polys_B.get_shapely()
-    iou_mat = np.zeros((len(polys_A), len(polys_B)))
+    # iou_mat = np.zeros((len(polys_A), len(polys_B)))
+    iou_mat = lil_matrix((len(polys_A), len(polys_B)), dtype=np.float32)
 
     if len(polys_A) == 0 or len(polys_B) == 0:
+        iou_mat = iou_mat.tocsr()
         return iou_mat
 
     bounds_A = polys_A.get_bounds()
@@ -4659,29 +4794,182 @@ def poly_overlaps(polys_A, polys_B, grid_size=(1024, 1024), iou_type='iou'):
 
     if grid_size is not None:
         grids = create_grid(bounds[0], bounds[1], bounds[2], bounds[3], grid_size[0], grid_size[1])
-        grids = np.concatenate([bounds[:2], bounds[:2]]).reshape(1,-1) + grids
+        # grids = np.concatenate([bounds[:2], bounds[:2]]).reshape(1,-1) + grids
     else:
         grids = bounds[None]
 
     overlap_mat_A = compute_overlap_matrix(grids, bounds_A)
     overlap_mat_B = compute_overlap_matrix(grids, bounds_B)
 
-
     result_idxes = []
     A_idxes = []
     B_idxes = []
+
     for i in range(len(grids)):
         cur_A_idxes = overlap_mat_A[i].nonzero()[0]
         cur_B_idxes = overlap_mat_B[i].nonzero()[0]
         cur_overlap_mat = compute_overlap_matrix(bounds_A[cur_A_idxes], bounds_B[cur_B_idxes])
+        cur_bbox_iou_mat = bbox_overlaps(
+            torch.tensor(bounds_A[cur_A_idxes]),
+            torch.tensor(bounds_B[cur_B_idxes])
+        )
+        cur_overlap_mat = cur_bbox_iou_mat > bbox_iou_thr
+
         if cur_overlap_mat.sum() == 0:
             continue
 
-        row_idxes, col_idxes = cur_overlap_mat.nonzero()
+        row_idxes, col_idxes = cur_overlap_mat.numpy().nonzero()
         for (row_id, col_id) in zip(row_idxes, col_idxes):
             cur_iou = iou_fun(poly_shps_A[cur_A_idxes[row_id]], poly_shps_B[cur_B_idxes[col_id]])
             iou_mat[cur_A_idxes[row_id], cur_B_idxes[col_id]] = cur_iou
 
+    iou_mat = iou_mat.tocsr()
     return iou_mat
 
+def align_shp(A_shp, B_shp):
+    centroid_A = A_shp.centroid
+    centroid_B = B_shp.centroid
 
+    translate_vector = (centroid_A.x - centroid_B.x, centroid_A.y - centroid_B.y)
+    B_aligned_to_A = shapely.affinity.translate(B_shp, *translate_vector)
+
+    return B_aligned_to_A
+
+def align_poly_json_pairs(A_json_list, B_json_list):
+    new_B_json_list = []
+    for A_json, B_json in zip(A_json_list, B_json_list):
+        A_shp = shapely.geometry.shape(A_json)
+        B_shp = shapely.geometry.shape(B_json)
+        new_B_shp = align_shp(A_shp, B_shp)
+        new_B_json_list.append(shapely.geometry.mapping(new_B_shp))
+        # print(f'{polygon_iou(A_shp, B_shp)} {polygon_iou(A_shp, new_B_shp)}')
+
+    return new_B_json_list
+
+def polygonize_sliced_masks(labeled_mask, slices):
+    """
+    Given a labeled mask (numpy array of shape (H, W)) and a list of slices,
+    polygonize the connected component in each slice and return a JSON-style polygon.
+    
+    Parameters:
+      labeled_mask (np.ndarray): The full image mask.
+      slices (List[tuple]): A list of tuples of slice objects, e.g. (slice(r1, r2), slice(c1, c2))
+    
+    Returns:
+      polygons (List[dict]): A list of dictionaries in GeoJSON-like format,
+                             each with 'type': 'Polygon' and 'coordinates': [exterior, interior1, ...].
+      colors (torch.Tensor): A tensor of label/color values extracted from the mask.
+    """
+    polygons = []
+    colors = []
+    
+    # Iterate over each slice
+    for cls_idx, slc in enumerate(slices):
+        # Extract the sub-mask from the labeled mask.
+        # Note: The submask is a view of the full mask.
+        submask = labeled_mask[slc] == cls_idx + 1
+        
+        # If no pixel is set in the submask, skip.
+        if not submask.any():
+            continue
+        
+        # Create a binary mask for contour finding. Convert to uint8.
+        binary_mask = (submask > 0).astype(np.uint8)
+        
+        # Find contours using cv2.findContours.
+        # Use cv2.RETR_CCOMP to retrieve both the exterior and interior contours.
+        contours, hierarchy = cv2.findContours(
+            binary_mask,
+            cv2.RETR_CCOMP,
+            cv2.CHAIN_APPROX_SIMPLE
+        )
+        
+        # If no contours found, continue.
+        if hierarchy is None:
+            continue
+        
+        hierarchy = hierarchy[0]  # Simplify the hierarchy
+        
+        # For each contour, process only exterior contours.
+        for i in range(len(contours)):
+            # An exterior contour has no parent (hierarchy[i][3] == -1)
+            if hierarchy[i][3] != -1:
+                continue
+            
+            # Get the exterior contour and ensure it has at least 3 points.
+            exterior = contours[i].squeeze()
+            if exterior.ndim == 1 or len(exterior) < 3:
+                continue
+            exterior = exterior.astype(int)
+            
+            # Because contours are in (x, y) format and relative to the submask,
+            # we need to add the slice’s start coordinates to shift them into global coordinates.
+            row_offset = slc[0].start if slc[0].start is not None else 0
+            col_offset = slc[1].start if slc[1].start is not None else 0
+            
+            # Adjust exterior coordinates.
+            exterior[:, 0] += col_offset  # x coordinate (col)
+            exterior[:, 1] += row_offset  # y coordinate (row)
+            
+            # Get a representative color (or label) from the first exterior point.
+            x, y = exterior[0]  # x=col, y=row
+            color = int(labeled_mask[y, x])
+            
+            # Collect interior contours (holes)
+            interiors = []
+            j = hierarchy[i][2]  # first child (hole)
+            while j != -1:
+                hole = contours[j].squeeze().astype(int)
+                if hole.ndim > 1 and len(hole) >= 3:
+                    # Adjust the hole coordinates too.
+                    hole[:, 0] += col_offset
+                    hole[:, 1] += row_offset
+                    interiors.append(hole.tolist())
+                j = hierarchy[j][0]  # next sibling
+            
+            # Build the polygon structure in JSON (GeoJSON-like) format.
+            # The first element in 'coordinates' is the exterior ring,
+            # followed by zero or more interior rings (holes).
+            polygon = {
+                'type': 'Polygon',
+                'coordinates': [exterior.tolist()] + interiors
+            }
+            polygons.append(polygon)
+            colors.append(color)
+    
+    return polygons, torch.tensor(colors, dtype=torch.long)
+
+def sample_neighborhood_points(poly_tensor, window_size=3, stride=1):
+    """
+    Samples a neighborhood of points around each point in the input tensor.
+
+    Args:
+        poly_tensor (torch.Tensor): Input tensor of shape (B, K, N, 2), where:
+            - B is the batch size,
+            - K is the number of linear rings,
+            - N is the number of points per ring,
+            - 2 corresponds to the (x, y) coordinates.
+        window_size (int): The size of the window (k). A window of k x k points will be sampled.
+        stride (int): The stride to scale the relative offsets.
+
+    Returns:
+        torch.Tensor: A tensor of shape (B, K, N, window_size*window_size, 2) where for each point,
+                      a neighborhood grid of points is generated.
+    """
+    # Create a range of offsets centered around 0
+    offset_range = torch.arange(-(window_size // 2), window_size // 2 + 1).to(poly_tensor.device)
+    # Generate a meshgrid for the offsets; grid_y corresponds to rows and grid_x to columns.
+    grid_y, grid_x = torch.meshgrid(offset_range, offset_range, indexing='ij')
+    # Stack the grid to get a tensor of shape (window_size, window_size, 2) then flatten to (window_size*window_size, 2)
+    offsets = torch.stack([grid_x, grid_y], dim=-1).reshape(-1, 2).to(poly_tensor.device)
+    # Scale offsets by the stride
+    offsets = offsets * stride
+
+    # Expand the input tensor to add a dimension for the neighborhood points:
+    # from (B, K, N, 2) to (B, K, N, 1, 2)
+    poly_tensor_expanded = poly_tensor.unsqueeze(3)
+
+    # Add the offsets to each point, broadcasting to create a grid of neighborhood points
+    sampled_points = poly_tensor_expanded + offsets  # Resulting shape: (B, K, N, window_size*window_size, 2)
+    
+    return sampled_points

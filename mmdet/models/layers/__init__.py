@@ -13,6 +13,7 @@ from .msdeformattn_pixel_decoder import MSDeformAttnPixelDecoder
 from .msdeformattn_pixel_decoder_v2 import MSDeformAttnPixelDecoderV2
 from .normed_predictor import NormedConv2d, NormedLinear
 from .pixel_decoder import PixelDecoder, TransformerEncoderPixelDecoder
+from .simple_pixel_decoder import SimplePixelDecoder
 from .positional_encoding import (LearnedPositionalEncoding,
                                   SinePositionalEncoding,
                                   SinePositionalEncoding3D)
@@ -64,5 +65,5 @@ __all__ = [
     'CdnQueryGenerator', 'Mask2FormerTransformerEncoder',
     'Mask2FormerTransformerDecoderLayer', 'Mask2FormerTransformerDecoder',
     'SinePositionalEncoding3D', 'FrozenBatchNorm2d', 'PolyFormerTransformerDecoder',
-    'MSDeformAttnPixelDecoderV2'
+    'MSDeformAttnPixelDecoderV2', 'SimplePixelDecoder'
 ]

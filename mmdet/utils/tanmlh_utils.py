@@ -623,24 +623,59 @@ def get_base_angle_idxes(angles, base_angles):
     return ang_dis, ang_idxes
 
 
-def poly_overlaps(polys_A, polys_B, grid_size=(1024, 1024), iou_type='iou', debug=False):
+def poly_overlaps(polys_A, polys_B, grid_size=(1024, 1024), iou_type='iou', bbox_iou_thr=0.0):
 
     def cal_iou(polygon1, polygon2, eps=1e-8):
+        if not polygon1.is_valid:
+            polygon1 = polygon1.buffer(1e-4)
+        if not polygon2.is_valid:
+            polygon2 = polygon2.buffer(1e-4)
+
         intersection = polygon1.intersection(polygon2)
         union = polygon1.union(polygon2)
         iou = intersection.area / (union.area + eps)
         return iou
 
     def cal_half_iou(polygon1, polygon2, eps=1e-8):
+        if not polygon1.is_valid:
+            polygon1 = polygon1.buffer(1e-4)
+        if not polygon2.is_valid:
+            polygon2 = polygon2.buffer(1e-4)
+
         intersection = polygon1.intersection(polygon2)
         # union = polygon1.union(polygon2)
         iou = intersection.area / (polygon1.area + eps)
         return iou
 
+    def cal_half_ioB(polygon1, polygon2, eps=1e-8):
+        if not polygon1.is_valid:
+            polygon1 = polygon1.buffer(1e-4)
+        if not polygon2.is_valid:
+            polygon2 = polygon2.buffer(1e-4)
+
+        intersection = polygon1.intersection(polygon2)
+        # union = polygon1.union(polygon2)
+        ioB = intersection.area / (polygon2.area + eps)
+        return ioB
+
+    def cal_fast_iou(polygon1, polygon2, eps=1e-8, tolerance=2.0):
+        polygon1 = polygon1.simplify(tolerance=tolerance)
+        polygon2 = polygon2.simplify(tolerance=tolerance)
+        return cal_iou(polygon1, polygon2, eps)
+
+
     if iou_type == 'iou':
         iou_fun = cal_iou
     elif iou_type == 'half_iou':
         iou_fun = cal_half_iou
+    elif iou_type == 'ioA':
+        iou_fun = cal_half_iou
+    elif iou_type == 'ioB':
+        iou_fun = cal_half_ioB
+    elif iou_type == 'fast_iou':
+        iou_fun = cal_fast_iou
+    else:
+        raise ValueError(f'iou_type {iou_type} is not supported')
 
     poly_shps_A = polys_A.get_shapely()
     poly_shps_B = polys_B.get_shapely()
@@ -667,16 +702,21 @@ def poly_overlaps(polys_A, polys_B, grid_size=(1024, 1024), iou_type='iou', debu
     result_idxes = []
     A_idxes = []
     B_idxes = []
-    if debug:
-        pdb.set_trace()
+
     for i in range(len(grids)):
         cur_A_idxes = overlap_mat_A[i].nonzero()[0]
         cur_B_idxes = overlap_mat_B[i].nonzero()[0]
         cur_overlap_mat = compute_overlap_matrix(bounds_A[cur_A_idxes], bounds_B[cur_B_idxes])
+        cur_bbox_iou_mat = bbox_overlaps(
+            torch.tensor(bounds_A[cur_A_idxes]),
+            torch.tensor(bounds_B[cur_B_idxes])
+        )
+        cur_overlap_mat = cur_bbox_iou_mat > bbox_iou_thr
+
         if cur_overlap_mat.sum() == 0:
             continue
 
-        row_idxes, col_idxes = cur_overlap_mat.nonzero()
+        row_idxes, col_idxes = cur_overlap_mat.numpy().nonzero()
         for (row_id, col_id) in zip(row_idxes, col_idxes):
             cur_iou = iou_fun(poly_shps_A[cur_A_idxes[row_id]], poly_shps_B[cur_B_idxes[col_id]])
             iou_mat[cur_A_idxes[row_id], cur_B_idxes[col_id]] = cur_iou

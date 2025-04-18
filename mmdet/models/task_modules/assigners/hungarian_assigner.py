@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import List, Optional, Union
 import pdb
+import numpy as np
 
 import torch
 from mmengine import ConfigDict
@@ -36,7 +37,8 @@ class HungarianAssigner(BaseAssigner):
 
     def __init__(
         self, match_costs: Union[List[Union[dict, ConfigDict]], dict,
-                                 ConfigDict]
+                                 ConfigDict],
+        solver='scipy'
     ) -> None:
 
         if isinstance(match_costs, dict):
@@ -48,6 +50,7 @@ class HungarianAssigner(BaseAssigner):
         self.match_costs = [
             TASK_UTILS.build(match_cost) for match_cost in match_costs
         ]
+        self.solver = solver
 
     def assign(self,
                pred_instances: InstanceData,
@@ -130,7 +133,24 @@ class HungarianAssigner(BaseAssigner):
             raise ImportError('Please run "pip install scipy" '
                               'to install scipy first.')
 
-        matched_row_inds, matched_col_inds = linear_sum_assignment(cost)
+        if self.solver == 'scipy':
+            matched_row_inds, matched_col_inds = linear_sum_assignment(cost)
+        elif self.solver == 'lapsolver':
+            matched_row_inds, matched_col_inds = linear_sum_assignment(cost)
+            # from lapsolver import solve_dense
+            # matched_row_inds, matched_col_inds = solve_dense(cost)
+            # matched_row_inds = matched_row_inds.astype(np.int64)
+            # matched_col_inds = matched_col_inds.astype(np.int64)
+        elif self.solver == 'lapjv':
+            import lap
+            _, matched_col_inds, matched_row_inds = lap.lapjv(cost.numpy(), extend_cost=True)
+            matched_row_inds = matched_row_inds[matched_row_inds >= 0]
+            matched_col_inds = matched_col_inds[matched_col_inds >= 0]
+
+            matched_row_inds = matched_row_inds.astype(np.int64)
+            matched_col_inds = matched_col_inds.astype(np.int64)
+            pdb.set_trace()
+
         matched_row_inds = torch.from_numpy(matched_row_inds).to(device)
         matched_col_inds = torch.from_numpy(matched_col_inds).to(device)
 

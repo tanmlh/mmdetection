@@ -158,7 +158,12 @@ class TwoStageDetector(BaseDetector):
         Returns:
             dict: A dictionary of loss components
         """
-        x = self.extract_feat(batch_inputs)
+        x = self.extract_feat(batch_inputs) # x: 5 featmaps # (256, 256), (128, 128), (64, 64) ...
+        # x[0]: (B, C, 256, 256) -> (B, C, 512, 512) using F.interpolate() torch.nn.functional.interpolate()
+        # high_x = F.interpoate(x[0], size=(512, 512))
+        # new_x = [high_x, *x] -> 6 feature maps
+
+        # (1024, 1024) -> (2048, 2048)
 
         losses = dict()
 

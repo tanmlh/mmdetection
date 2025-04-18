@@ -8,6 +8,8 @@ from mmdet.registry import MODELS
 from mmdet.utils import ConfigType, OptMultiConfig
 from .base_roi_extractor import BaseRoIExtractor
 
+import pdb
+
 
 @MODELS.register_module()
 class SingleRoIExtractor(BaseRoIExtractor):
@@ -82,6 +84,7 @@ class SingleRoIExtractor(BaseRoIExtractor):
         rois = rois.type_as(feats[0])
         out_size = self.roi_layers[0].output_size
         num_levels = len(feats)
+
         roi_feats = feats[0].new_zeros(
             rois.size(0), self.out_channels, *out_size)
 

@@ -6,10 +6,12 @@ import pdb
 from mmengine.config import Config, DictAction
 from mmengine.registry import init_default_scope
 from mmengine.utils import ProgressBar
+from mmengine.structures import InstanceData, PixelData
 
 from mmdet.models.utils import mask2ndarray
 from mmdet.registry import DATASETS, VISUALIZERS
 from mmdet.structures.bbox import BaseBoxes
+import mmdet.utils.tanmlh_polygon_utils as polygon_utils
 
 
 def parse_args():
@@ -54,7 +56,7 @@ def main():
     visualizer.dataset_meta = dataset.metainfo
 
     progress_bar = ProgressBar(len(dataset))
-    for item in dataset:
+    for i, item in enumerate(dataset):
         img = item['inputs'].permute(1, 2, 0).numpy()
         data_sample = item['data_samples'].numpy()
         gt_instances = data_sample.gt_instances
@@ -69,19 +71,58 @@ def main():
         if gt_bboxes is not None and isinstance(gt_bboxes, BaseBoxes):
             gt_instances.bboxes = gt_bboxes.tensor
         gt_masks = gt_instances.get('masks', None)
+
+        """
         if gt_masks is not None:
             masks = mask2ndarray(gt_masks)
             gt_instances.masks = masks.astype(bool)
+            gt_poly_jsons = gt_masks.to_json()
+
+            # gt_poly_jsons = polygon_utils.simplify_poly_jsons(
+            #     gt_poly_jsons, lam=2, max_step_size=128, num_min_bins=16,
+            #     interval=2, return_format='json',
+            #     device='cuda:0'
+            #     # device='cpu'
+            # )
+            gt_instances.segmentations = gt_poly_jsons
+        """
+
         data_sample.gt_instances = gt_instances
 
         visualizer.add_datasample(
-            osp.basename(img_path),
+            'imgs',
+            img,
+            None,
+            draw_pred=False,
+            show=not args.not_show,
+            wait_time=args.show_interval,
+            out_file=out_file,
+            step=i
+        )
+
+        data_sample.gt_sem_seg = PixelData(sem_seg=data_sample.gt_instances.masks.to_single_ndarray()[None])
+        visualizer.add_datasample(
+            'img_gts',
             img,
             data_sample,
             draw_pred=False,
             show=not args.not_show,
             wait_time=args.show_interval,
-            out_file=out_file)
+            out_file=out_file,
+            step=i
+        )
+
+        del data_sample.gt_instances.masks
+        visualizer.add_datasample(
+            'img_bboxes',
+            img,
+            data_sample,
+            draw_pred=False,
+            show=not args.not_show,
+            wait_time=args.show_interval,
+            out_file=out_file,
+            step=i
+        )
 
         progress_bar.update()
 

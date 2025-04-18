@@ -8,6 +8,7 @@ from mmengine.utils import is_str
 from mmdet.structures.mask import PolygonMasks
 from terminaltables import AsciiTable
 from mmdet.utils import tanmlh_polygon_utils as polygon_utils
+import scipy
 
 from .bbox_overlaps import bbox_overlaps
 from .class_names import get_classes
@@ -594,8 +595,13 @@ def tpfp_poly(det_polys,
     ious = polygon_utils.poly_overlaps(
         det_polys, gt_polys
     )
+
     # for each det, the max iou with all gts
-    ious_max = ious.max(axis=1)
+    if type(ious) == scipy.sparse._csr.csr_matrix:
+        ious_max = ious.max(axis=1).toarray()
+    else:
+        ious_max = ious.max(axis=1)
+
     # for each det, which gt overlaps most with it
     ious_argmax = ious.argmax(axis=1)
     # sort all dets in descending order by scores

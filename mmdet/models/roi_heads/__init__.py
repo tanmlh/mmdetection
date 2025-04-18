@@ -27,6 +27,7 @@ from .st_poly_roi_head import STPolyRoIHead
 from .st_rotated_roi_head import STRotatedRoIHead
 from .trident_roi_head import TridentRoIHead
 from .poly_heads import FCNPolyHead
+from .poly_roi_head import PolyRoIHead
 
 __all__ = [
     'BaseRoIHead', 'CascadeRoIHead', 'DoubleHeadRoIHead', 'MaskScoringRoIHead',
@@ -39,5 +40,6 @@ __all__ = [
     'CoarseMaskHead', 'DynamicRoIHead', 'SparseRoIHead', 'TridentRoIHead',
     'SCNetRoIHead', 'SCNetMaskHead', 'SCNetSemanticHead', 'SCNetBBoxHead',
     'FeatureRelayHead', 'GlobalContextHead', 'MultiInstanceRoIHead',
-    'STRoIHead', 'STRotatedRoIHead', 'FCNPolyHead', 'STPolyRoIHead'
+    'STRoIHead', 'STRotatedRoIHead', 'FCNPolyHead', 'STPolyRoIHead',
+    'PolyRoIHead'
 ]

@@ -4,6 +4,8 @@ from abc import ABCMeta, abstractmethod
 from typing import Sequence, Type, TypeVar
 import torch.nn.functional as F
 import pdb
+import math
+import rasterio
 
 import cv2
 import mmcv
@@ -639,7 +641,7 @@ class PolygonMasks(BaseInstanceMasks):
         >>> assert new.height, new.width == out_shape
     """
 
-    def __init__(self, masks, height, width):
+    def __init__(self, masks, height, width, masks_shapely=None):
         assert isinstance(masks, list)
         if len(masks) > 0:
             assert isinstance(masks[0], list)
@@ -648,6 +650,7 @@ class PolygonMasks(BaseInstanceMasks):
         self.height = height
         self.width = width
         self.masks = masks
+        self.masks_shapely = masks_shapely
 
     def __getitem__(self, index):
         """Index the polygon masks.
@@ -673,7 +676,7 @@ class PolygonMasks(BaseInstanceMasks):
                     f'Unsupported input of type {type(index)} for indexing!')
         if len(masks) and isinstance(masks[0], np.ndarray):
             masks = [masks]  # ensure a list of three levels
-        return PolygonMasks(masks, self.height, self.width)
+        return PolygonMasks(masks, self.height, self.width, self.masks_shapely)
 
     def __iter__(self):
         return iter(self.masks)
@@ -718,7 +721,7 @@ class PolygonMasks(BaseInstanceMasks):
         return polygon_masks
 
     def get_shapely(self):
-        if not hasattr(self, 'masks_shapely') or len(self.masks_shapely) != len(self):
+        if self.masks_shapely is None or len(self.masks_shapely) != len(self):
             masks_shapely = []
             for poly_json in self.to_json():
                 masks_shapely.append(shapely.geometry.shape(poly_json))
@@ -726,15 +729,63 @@ class PolygonMasks(BaseInstanceMasks):
 
         return self.masks_shapely
 
+    def get_minimum_rotated_angle(self):
+
+        def get_orientation(polygon):
+            # Compute the minimum rotated rectangle (MRR)
+            mrr = polygon.minimum_rotated_rectangle
+            # Extract coordinates from the MRR (will have 5 points with the first repeated last)
+            coords = list(mrr.exterior.coords)
+            # Compute the edge from the first point to the second
+            dx = coords[1][0] - coords[0][0]
+            dy = coords[1][1] - coords[0][1]
+            # Calculate the angle with the horizontal axis, in degrees.
+            angle = math.degrees(math.atan2(dy, dx))
+            # Normalize the angle to be in [0,180)
+            angle = angle % 180
+            # Choose the smaller absolute angle so that the final angle is in [0, 90)
+            if angle >= 90:
+                angle = 180 - angle
+            return angle
+
+        masks_shapely = self.get_shapely()
+        angles = [get_orientation(poly) for poly in masks_shapely]
+        return angles
+
     def extend(self, poly_masks):
         assert self.height == poly_masks.height
         assert self.width == poly_masks.width
 
-        return PolygonMasks(self.masks + poly_masks.masks, self.height, self.width)
+        return PolygonMasks(self.masks + poly_masks.masks, self.height, self.width, self.masks_shapely)
 
-    def get_bounds(self):
-        masks_shapely = self.get_shapely()
-        bounds = np.array([x.bounds for x in masks_shapely])
+    def get_bounds(self, buffer=0, min_w=-1):
+        bounds = []
+        for mask in self.masks:
+            points = mask[0].reshape(-1,2)
+            x_min, y_min = np.min(points, axis=0)
+            x_max, y_max = np.max(points, axis=0)
+
+            if min_w > 0:
+                if (x_max - x_min) < min_w:
+                    x_min = (x_min + x_max) / 2 - min_w / 2
+                    x_max = (x_min + x_max) / 2 + min_w / 2
+                if (y_max - y_min) < min_w:
+                    y_min = (y_min + y_max) / 2 - min_w / 2
+                    y_max = (y_min + y_max) / 2 + min_w / 2
+
+            if buffer > 0:
+                x_min -= buffer
+                x_max += buffer
+                y_min -= buffer
+                y_max += buffer
+
+            bound = (x_min, y_min, x_max, y_max)
+            bounds.append(bound)
+
+        bounds = np.array(bounds)
+
+        # masks_shapely = self.get_shapely()
+        # bounds = np.array([x.bounds for x in masks_shapely])
         return bounds
 
     def get_valid_idxes(self):
@@ -976,7 +1027,7 @@ class PolygonMasks(BaseInstanceMasks):
 
     def pad(self, out_shape, pad_val=0):
         """padding has no effect on polygons`"""
-        return PolygonMasks(self.masks, *out_shape)
+        return PolygonMasks(self.masks, *out_shape, masks_shapely=self.masks_shapely)
 
     def expand(self, *args, **kwargs):
         """TODO: Add expand for polygon"""
@@ -1141,16 +1192,24 @@ class PolygonMasks(BaseInstanceMasks):
 
     def merge(self):
 
-        new_masks = []
+        exteriors = []
+        interiors = []
+
         for mask in self.masks:
             if len(mask) == 1 and (mask[0] == 0).all():
                 continue
-            new_masks.extend(mask)
 
-        if len(new_masks) == 0:
+            # exteriors.append(mask[0])
+            # interiors.extend(mask[1:])
+            exteriors.extend(mask)
+
+        if len(exteriors) == 0:
             return PolygonMasks([[np.array([0,0,0,0,0,0])]], self.height, self.width)
 
-        return PolygonMasks([new_masks], self.height, self.width)
+        if len(interiors) > 0:
+            pdb.set_trace()
+
+        return PolygonMasks([exteriors], self.height, self.width)
 
     def paste_by_bboxes(self, bboxes, h, w):
         assert len(self.masks) == len(bboxes)
@@ -1265,6 +1324,14 @@ class PolygonMasks(BaseInstanceMasks):
                 polygon_to_bitmap(poly_per_obj, self.height, self.width))
         return np.stack(bitmap_masks)
 
+    def to_single_ndarray(self):
+        poly_shps = self.get_shapely()
+        poly_shps = [x.buffer(1e-4) if not x.is_valid else x for x in poly_shps]
+        union = shapely.ops.unary_union(poly_shps)
+        ndarray = rasterio.features.rasterize([(union, 1)], out_shape=(self.height, self.width))
+
+        return ndarray
+
     def to_tensor(self, dtype, device):
         """See :func:`BaseInstanceMasks.to_tensor`."""
         if len(self.masks) == 0:
@@ -1359,6 +1426,36 @@ class PolygonMasks(BaseInstanceMasks):
             new_masks.append(new_rings)
 
         return PolygonMasks(new_masks, self.height, self.width)
+
+    def intersect(self, poly_B, min_area=4):
+        assert len(poly_B) == 1
+        shp_B = poly_B.get_shapely()[0]
+        if not shp_B.is_valid:
+            shp_B = shp_B.buffer(1e-4)
+
+        new_shp_masks = []
+        shp_masks = self.get_shapely()
+        for shp_mask in shp_masks:
+            if not shp_mask.is_valid:
+                shp_mask = shp_mask.buffer(1e-4)
+
+            # if not shp_mask.intersects(shp_B):
+            #     continue
+
+            new_poly = shp_mask.intersection(shp_B)
+            if new_poly.geom_type == 'GeometryCollection' or new_poly.geom_type == 'MultiPolygon':
+                new_poly = new_poly.geoms[0]
+
+            if not (new_poly.geom_type == 'Polygon'):
+                continue
+
+            if new_poly.is_valid and new_poly.area > min_area:
+                new_shp_masks.append(new_poly)
+
+        return PolygonMasks.from_shapely(new_shp_masks, self.height, self.width)
+
+
+
 
     def sample_points(self, interval=None, num_bins=None, pad_length=None, num_min_bins=8, num_max_bins=512):
 

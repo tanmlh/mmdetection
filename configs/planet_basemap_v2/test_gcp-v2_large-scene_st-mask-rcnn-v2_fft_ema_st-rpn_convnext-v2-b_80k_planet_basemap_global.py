@@ -257,7 +257,7 @@ model = dict(
             max_per_img=2048,
             nms=dict(type='nms', iou_threshold=0.5),
             min_bbox_size=0,
-            score_thr=0.2
+            score_thr=0.1
         ),
         rcnn=dict(
             # not used
@@ -437,8 +437,8 @@ test_dataloader = dict(
         # ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
         # ann_file = 'coco_ann_global/test_continent_global_quartely_2023q2.json',
         # ann_file = 'coco_ann/munich.json',
-        # ann_file = 'coco_ann/medellin.json',
-        ann_file = 'coco_ann/large_munich.json',
+        ann_file = 'coco_ann/medellin.json',
+        # ann_file = 'coco_ann/large_munich.json',
         min_bbox_w=2
     )
 )

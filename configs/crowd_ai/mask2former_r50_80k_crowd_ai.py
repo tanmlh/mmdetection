@@ -231,7 +231,7 @@ default_hooks = dict(
         max_keep_ckpts=3,
         interval=interval),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    # visualization=dict(type='TanmlhVisualizationHook', draw=True)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=50, score_thr=0.1)
 )
 
 vis_backends = [
@@ -241,7 +241,7 @@ vis_backends = [
             project = 'mmdetection',
             entity = 'tum-tanmlh',
             name = 'mask2former_r50_query-300_80k_crowd_ai',
-            resume = 'auto',
+            resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),

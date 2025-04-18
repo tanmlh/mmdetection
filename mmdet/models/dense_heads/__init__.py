@@ -44,6 +44,7 @@ from .retina_head import RetinaHead
 from .retina_sepbn_head import RetinaSepBNHead
 from .rpn_head import RPNHead
 from .st_rpn_head import STRPNHead
+from .up_rpn_head import UpRPNHead
 from .st_mmd_rpn_head import STMMDRPNHead
 from .st_rotated_rpn_head import STRotatedRPNHead
 from .rtmdet_head import RTMDetHead, RTMDetSepBNHead
@@ -101,5 +102,6 @@ __all__ = [
     'PolygonizerHeadV6', 'PolygonizerHeadV7', 'PolygonizerHeadV8', 'PolygonizerHeadV9',
     'PolygonizerHeadV10', 'PolygonizerHeadV11', 'PolygonizerHeadV12', 'PolygonizerHeadV13',
     'PolygonizerHeadV14', 'PolygonizerHeadV15', 'PolygonizerHeadV17', 'PolygonizerHeadV18',
-    'PolygonizerHeadV19', 'PolygonizerHeadV20', 'Mask2FormerHeadV2', 'STRPNHead', 'STMMDRPNHead'
+    'PolygonizerHeadV19', 'PolygonizerHeadV20', 'Mask2FormerHeadV2', 'STRPNHead', 'STMMDRPNHead',
+    'UpRPNHead'
 ]

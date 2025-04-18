@@ -89,7 +89,8 @@ def main():
         pred_instances = InstanceData(
             bboxes=pred_bboxes,
             scores=pred_scores,
-            labels=pred_labels
+            labels=pred_labels,
+            segmentations=pred_polygons.to_json()
         )
 
         gt_instances = data_sample.gt_instances

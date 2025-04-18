@@ -106,7 +106,11 @@ model = dict(
             conv_out_channels=256,
             num_classes=1,
             loss_mask=dict(
-                type='CrossEntropyLoss', use_mask=True, loss_weight=1.0))),
+                type='CrossEntropyLoss', use_mask=True, loss_weight=1.0)),
+        poly_head=dict(
+            type='NaivePolyHead'
+        ),
+    ),
     # model training and testing settings
     train_cfg=dict(
         apply_mixup=True,
@@ -169,7 +173,7 @@ model = dict(
             nms=dict(type='nms', iou_threshold=0.5),
             max_per_img=2048,
             mask_thr_binary=0.5,
-            disable_mask_head=True,
+            block_mask_predict=True
         ),
         inf_cfg=dict(
             mode='slide', crop_size=(1024, 1024), stride=(1024, 1024),
@@ -177,14 +181,31 @@ model = dict(
             out_size=None, out_size_scale=1.,
             filter_border_width = 0,
             sem_seg_type='sem_seg',
-            sem_seg_thr=0.5,
+            sem_seg_thr=0.4,
             eval_proposal=False
         ),
-        nms_cfg=dict(
-            nms_type='none',
-            # nms_type='no_overlap',
-            iou_thr=0.5
-        )
+        post_cfg = dict(
+            type='InstancePostProcessor',
+            out_size=(1024, 1024),
+            do_crop_to_boundary=True,
+            do_filter_large=False,
+            max_area = 1600,
+            # crop_box = (32 * 4, 32 * 4, (4096 + 32) * 4, (4096 + 32) * 4),
+            # crop_box = (0,0,4096*4,4096*4),
+            crop_box = (0,0,1024,1024),
+            do_merge_with_fg=False,
+            nms_cfg=dict(
+                nms_type='polygon',
+                iou_thr=0.8,
+                half_iou_thr1=0.8,
+                half_iou_thr2=0.0,
+            ),
+            out_cfg=dict(
+                save_results=False,
+                out_dir='./work_dirs/basemap_pred_results/st-mark-rcnn-v2_convnext-v2-b',
+                out_poly_scale=1/4.,
+            )
+        ),
     ))
 
 val_evaluator = [
@@ -261,7 +282,7 @@ default_hooks = dict(
         type='EMAHook', momentum=0.01, interval=1
     ),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=25)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1)
 )
 
 vis_backends = [
@@ -270,14 +291,14 @@ vis_backends = [
         init_kwargs=dict(
             project = 'mmdetection-planet_basemap',
             entity = 'tum-tanmlh',
-            name = 'st-mask-rcnn-v2_fft_ema_st-rpn_r50_100e_planet_basemap_sample-global-small',
+            name = 'test_st-mask-rcnn-v2_fft_ema_st-rpn_r50_100e_planet_basemap_sample-global-small',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
-vis_backends = [dict(type='LocalVisBackend')]
+# vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )

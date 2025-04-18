@@ -56,10 +56,10 @@ model = dict(
         type='STRPNHead',
         st_cfg=dict(
             st_ignore_thr=0.9,
-            drop_rate=0.4,
-            alpha=0.999,
+            drop_rate=0.3,
+            alpha=0.99,
             init_cls=True,
-            do_memory_bank=True,
+            do_memory_bank=False,
             memory_size=2,
             warm_up_iter=1e9, # do not apply thresholding
             alpha_memory=0.99,
@@ -171,22 +171,40 @@ model = dict(
             score_thr=0.1,
             nms=dict(type='nms', iou_threshold=0.5),
             max_per_img=2048,
-            mask_thr_binary=0.5),
+            mask_thr_binary=0.5,
+            block_mask_predict=True
+        ),
         inf_cfg=dict(
             mode='slide', crop_size=(1024, 1024), stride=(1024, 1024),
             crop_up_size=(1024, 1024),
             out_size=None, out_size_scale=1.,
             filter_border_width = 0,
             sem_seg_type='sem_seg',
-            sem_seg_thr=0.5,
+            sem_seg_thr=0.4,
             eval_proposal=False
         ),
-        nms_cfg=dict(
-            # nms_type='none',
-            nms_type='polygon',
-            # nms_type='no_overlap',
-            iou_thr=0.5
-        )
+        post_cfg = dict(
+            type='InstancePostProcessor',
+            out_size=(1024, 1024),
+            do_crop_to_boundary=True,
+            do_filter_large=False,
+            max_area = 1600,
+            # crop_box = (32 * 4, 32 * 4, (4096 + 32) * 4, (4096 + 32) * 4),
+            # crop_box = (0,0,4096*4,4096*4),
+            crop_box = (0,0,1024,1024),
+            do_merge_with_fg=False,
+            nms_cfg=dict(
+                nms_type='polygon',
+                iou_thr=0.8,
+                half_iou_thr1=0.1,
+                half_iou_thr2=0.0,
+            ),
+            out_cfg=dict(
+                save_results=False,
+                out_dir='./work_dirs/basemap_pred_results/st-mark-rcnn-v2_convnext-v2-b',
+                out_poly_scale=1/4.,
+            )
+        ),
     ))
 
 val_evaluator = [
@@ -198,15 +216,13 @@ val_evaluator = [
         ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_global/test_continent_global_quartely_2023q2.json',
         # metric=['bbox'],
         # metric=['map_fast', 'proposal_fast', 'bbox_fast'],
-        metric=['map_fast', 'bbox_fast'],
+        metric=['poly_ap_fast', 'map_fast', 'bbox_fast'],
         # split_meta_key='continent',
         backend_args={{_base_.backend_args}},
         out_cfg=dict(
             save_results=False,
             out_dir='./work_dirs/basemap_pred_results/st-mark-rcnn',
             out_size=(256, 256),
-            save_coco=True,
-            saved_coco_path='./work_dirs/basemap_pred_results/st-mark-rcnn-v2/naive.json'
         ),
         min_bbox_size=8,
         iou_thrs=[0.3, 0.35, 0.4, 0.45, 0.5],

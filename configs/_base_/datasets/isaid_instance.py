@@ -1,20 +1,21 @@
 # dataset settings
 dataset_type = 'iSAIDDataset'
-data_root = 'data/iSAID/'
+data_root = '/home/Datasets/Dataset4EO/iSAID_patches'
 backend_args = None
 
 # Please see  `projects/iSAID/README.md` for data preparation
 train_pipeline = [
     dict(type='LoadImageFromFile', backend_args=backend_args),
-    dict(type='LoadAnnotations', with_bbox=True, with_mask=True),
+    dict(type='LoadAnnotations', with_bbox=True, with_mask=True, poly2mask=False),
     dict(type='Resize', scale=(800, 800), keep_ratio=True),
-    dict(type='RandomFlip', prob=0.5),
+    # dict(type='RandomCrop', crop_size=(512, 512)),
+    # dict(type='RandomFlip', prob=0.5),
     dict(type='PackDetInputs')
 ]
 test_pipeline = [
     dict(type='LoadImageFromFile', backend_args=backend_args),
     dict(type='Resize', scale=(800, 800), keep_ratio=True),
-    dict(type='LoadAnnotations', with_bbox=True, with_mask=True),
+    dict(type='LoadAnnotations', with_bbox=True, with_mask=True, poly2mask=False),
     dict(
         type='PackDetInputs',
         meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape',

@@ -164,11 +164,11 @@ class TanmlhVisualizer(Visualizer):
 
             for i, (pos, label) in enumerate(zip(positions, labels)):
                 label_text = ''
-                # if 'label_names' in instances:
-                #     label_text = instances.label_names[i]
-                # else:
-                #     label_text = classes[
-                #         label] if classes is not None else f'class {label}'
+                if 'label_names' in instances:
+                    label_text = instances.label_names[i]
+                else:
+                    label_text = classes[label] if classes is not None else f'class {label}'
+
                 if 'scores' in instances:
                     score = round(float(instances.scores[i]) * 100, 1)
                     # label_text += f': {score}'
@@ -467,16 +467,23 @@ class TanmlhVisualizer(Visualizer):
         if draw_gt and data_sample is not None:
             gt_img_data = image
             if 'gt_instances' in data_sample:
-                gt_img_data = self._draw_instances(image,
-                                                   data_sample.gt_instances,
-                                                   classes, palette)
+                gt_instances = data_sample.gt_instances
+                # gt_img_data = self._draw_instances(image,
+                #                                    gt_instances,
+                #                                    classes, palette)
+                # if 'segmentations' in gt_instances:
+                if 'masks' in gt_instances:
+                    vis_poly = self._vis_poly(image, gt_instances.masks.to_json())
+                    if vis_poly is not None:
+                        pred_img_data = np.concatenate((gt_img_data, vis_poly), axis=1)
+                        self.add_image('gt_poly', vis_poly, step)
 
-            """
             if 'gt_sem_seg' in data_sample:
                 gt_img_data = self._draw_sem_seg(gt_img_data,
                                                  data_sample.gt_sem_seg,
                                                  classes, palette)
 
+            """
             if 'gt_panoptic_seg' in data_sample:
                 assert classes is not None, 'class information is ' \
                                             'not provided when ' \
@@ -515,6 +522,7 @@ class TanmlhVisualizer(Visualizer):
                     #     pdb.set_trace()
 
 
+
             if 'poly_reg_targets' in data_sample:
                 poly_reg_targets = data_sample.poly_reg_targets
                 vis_poly = self._vis_poly(image, poly_reg_targets)
@@ -541,6 +549,11 @@ class TanmlhVisualizer(Visualizer):
             if 'pred_sem_seg' in data_sample:
                 vis_sem_seg = self._draw_sem_seg(image, data_sample.pred_sem_seg, classes, palette)
                 pred_img_data = np.concatenate((pred_img_data, vis_sem_seg), axis=1)
+
+            if 'pred_sem_seg_prob' in data_sample:
+                prob_map = self.draw_featmap(data_sample.pred_sem_seg_prob)
+                pred_img_data = np.concatenate((pred_img_data, prob_map), axis=1)
+
             """
 
             if 'pred_panoptic_seg' in data_sample:
@@ -643,6 +656,8 @@ class TanmlhVisualizer(Visualizer):
             for xi, yi in coords:
                 # ax.plot(xi[:-1], yi[:-1], marker="o", color='blue', markersize=W // 2)
                 # ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=W)
+                # ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=W / 200)
+                # ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=6)
                 ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=2)
                 # ax.plot(xi[:-1], yi[:-1], marker="o", color=point_colors[i], markersize=W//2)
                 # ax.plot(xi[:3], yi[:3], marker="o", color='red', markersize=W)

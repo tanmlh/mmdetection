@@ -105,14 +105,18 @@ class Mask2FormerHead(MaskFormerHead):
         self.num_transformer_feat_level = num_transformer_feat_level
         self.num_heads = transformer_decoder.layer_cfg.cross_attn_cfg.num_heads
         self.num_transformer_decoder_layers = transformer_decoder.num_layers
-        assert pixel_decoder.encoder.layer_cfg. \
-            self_attn_cfg.num_levels == num_transformer_feat_level
-        pixel_decoder_ = copy.deepcopy(pixel_decoder)
-        pixel_decoder_.update(
-            in_channels=in_channels,
-            feat_channels=feat_channels,
-            out_channels=out_channels)
-        self.pixel_decoder = MODELS.build(pixel_decoder_)
+        if pixel_decoder['type'] == 'MSDeformAttnPixelDecoder':
+            assert pixel_decoder.encoder.layer_cfg. \
+                self_attn_cfg.num_levels == num_transformer_feat_level
+            pixel_decoder_ = copy.deepcopy(pixel_decoder)
+            pixel_decoder_.update(
+                in_channels=in_channels,
+                feat_channels=feat_channels,
+                out_channels=out_channels)
+            self.pixel_decoder = MODELS.build(pixel_decoder_)
+        else:
+            self.pixel_decoder = MODELS.build(pixel_decoder)
+
         self.transformer_decoder = Mask2FormerTransformerDecoder(
             **transformer_decoder)
         self.decoder_embed_dims = self.transformer_decoder.embed_dims
@@ -375,6 +379,7 @@ class Mask2FormerHead(MaskFormerHead):
             # shape (num_total_gts, h, w) -> (num_total_gts, num_points)
             mask_point_targets = point_sample(
                 mask_targets.unsqueeze(1).float(), points_coords).squeeze(1)
+
         # shape (num_queries, h, w) -> (num_queries, num_points)
         mask_point_preds = point_sample(
             mask_preds.unsqueeze(1), points_coords).squeeze(1)
@@ -462,6 +467,7 @@ class Mask2FormerHead(MaskFormerHead):
 
         batch_size = x[0].shape[0]
         mask_features, multi_scale_memorys = self.pixel_decoder(x)
+
         # multi_scale_memorys (from low resolution to high resolution)
         decoder_inputs = []
         decoder_positional_encodings = []

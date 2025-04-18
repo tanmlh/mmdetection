@@ -25,8 +25,6 @@ import numpy as np
 from tqdm import tqdm
 from mmdet.utils import tanmlh_polygon_utils as polygon_utils
 
-
-
 @MODELS.register_module()
 class STMaskRCNN(TwoStageDetector):
     """Implementation of `Mask R-CNN <https://arxiv.org/abs/1703.06870>`_"""
@@ -235,8 +233,17 @@ class STMaskRCNN(TwoStageDetector):
             t4 = time.time()
 
             if self.seg_head is not None:
+
+                seg_feats = ori_x
+                if self.test_cfg.get('seg_head', {}).get('up_feat_levels', None) is not None:
+                    seg_feats = []
+                    for level in self.test_cfg['seg_head']['up_feat_levels']:
+                        _, _, h, w = ori[level].shape
+                        new_x = F.interpolate(ori[level], (h * 2, w * 2))
+                        seg_feats.append(new_x)
+
                 pseudo_meta_infos = [data_sample.metainfo for data_sample in pseudo_data_samples]
-                pred_sem_seg = self.seg_head.predict(ori_x, pseudo_meta_infos, None)
+                pred_sem_seg = self.seg_head.predict(seg_feats, pseudo_meta_infos, None)
                 sem_seg_list = [
                     InstanceData(
                         sem_seg=cur_sem_seg[None], offsets=offset[None]
@@ -324,7 +331,6 @@ class STMaskRCNN(TwoStageDetector):
 
 
             results[0] = post_processor.process(results[0])
-
             # merged_sem_seg = results[0].pred_instances.polygon_masks.merge().to_tensor(dtype=torch.uint8, device='cpu')
             # pixel_data = PixelData(sem_seg=merged_sem_seg)
             # results[0].pred_sem_seg = pixel_data
@@ -414,20 +420,32 @@ class STMaskRCNN(TwoStageDetector):
         seg_data_samples = []
         if self.seg_head is not None:
             for data_sample in batch_data_samples:
-                gt_sem_seg = data_sample.gt_instances.masks.merge().to_tensor(device=x[0].device, dtype=torch.long)
-                out_h, out_w = gt_sem_seg.shape[1:]
+                # gt_sem_seg = data_sample.gt_instances.masks.merge().to_tensor(device=x[0].device, dtype=torch.long)
+                # out_h, out_w = gt_sem_seg.shape[1:]
                 # data_sample.gt_sem_seg = PixelData(sem_seg=gt_sem_seg)
                 # data_sample.gt_sem_seg = PixelData(gt_sem_seg=gt_sem_seg)
-                seg_data_samples.append(PixelData(gt_sem_seg=gt_sem_seg))
+                # seg_data_samples.append(PixelData(gt_sem_seg=gt_sem_seg))
+                gt_sem_seg = data_sample.gt_sem_seg
+                gt_sem_seg.gt_sem_seg = gt_sem_seg.sem_seg
+                seg_data_samples.append(gt_sem_seg)
+
+            seg_feats = x
+            if self.train_cfg.get('seg_head', {}).get('up_feat_levels', None) is not None:
+                seg_feats = []
+                for level in self.train_cfg['seg_head']['up_feat_levels']:
+                    _, _, h, w = x[level].shape
+                    new_x = F.interpolate(x[level], (h * 2, w * 2))
+                    seg_feats.append(new_x)
 
             # losses_seg = self.seg_head.loss(x, seg_data_samples, None)
-            seg_logits = self.seg_head.forward(x)
+            seg_logits = self.seg_head.forward(seg_feats)
+
             losses_seg = self.seg_head.loss_by_feat(seg_logits, seg_data_samples)
             losses.update(losses_seg)
 
             seg_logits = F.interpolate(
                 input=seg_logits,
-                size=gt_sem_seg.shape[1:],
+                size=gt_sem_seg.shape,
                 mode='bilinear',
                 align_corners=False)
 

@@ -204,7 +204,7 @@ default_hooks = dict(
         max_keep_ckpts=15,
         interval=1),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    # visualization=dict(type='TanmlhVisualizationHook', draw=True)
+    visualization=dict(type='TanmlhVisualizationHook', draw=True)
 )
 
 vis_backends = [

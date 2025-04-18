@@ -3,7 +3,7 @@ _base_ = [
 ]
 
 # load_from = 'work_dirs/st-mask-rcnn_merged_min-bbox-2_iou-thr-03_r50_100e_planet_basemap_sample-europe/epoch_80.pth'
-load_from = 'work_dirs/st-mask-rcnn-v2_fft_ema_st-rpn_convnext-v2-b_50e_planet_basemap_global/epoch_6.pth'
+load_from = 'work_dirs/st-mask-rcnn-v2_fft_ema_st-rpn_convnext-v2-b_24e_planet_basemap_global/epoch_3.pth'
 
 custom_imports = dict(
     imports=['mmpretrain.models'], allow_failed_imports=False)
@@ -113,9 +113,6 @@ model = dict(
             num_classes=1,
             loss_mask=dict(
                 type='CrossEntropyLoss', use_mask=True, loss_weight=1.0)),
-        # poly_head=dict(
-        #     type='NaivePolyHead'
-        # ),
         poly_head=dict(
             type='DPPolygonizeHead',
             feat_channels=256,
@@ -217,7 +214,6 @@ model = dict(
             ),
             sampler=dict(
                 type='RandomSampler',
-                # num=4096 * 8,
                 num=512*512,
                 pos_fraction=0.5,
                 neg_pos_ub=-1,
@@ -255,7 +251,7 @@ model = dict(
             max_per_img=2048,
             nms=dict(type='nms', iou_threshold=0.5),
             min_bbox_size=0,
-            score_thr=0.2
+            score_thr=0.05
         ),
         rcnn=dict(
             # not used
@@ -271,23 +267,23 @@ model = dict(
             out_size=None, out_size_scale=1.,
             filter_border_width = 0,
             sem_seg_type='sem_seg',
-            sem_seg_thr=0.4,
+            sem_seg_thr=0.3,
             eval_proposal=False
         ),
         post_cfg = dict(
             type='InstancePostProcessor',
             out_size=(1024, 1024),
             do_crop_to_boundary=True,
-            do_filter_large=False,
+            do_filter_large=True,
             max_area = 1600,
             # crop_box = (32 * 4, 32 * 4, (4096 + 32) * 4, (4096 + 32) * 4),
             # crop_box = (0,0,4096*4,4096*4),
             crop_box = (0,0,1024,1024),
-            do_merge_with_fg=False,
+            do_merge_with_fg=True,
             nms_cfg=dict(
                 nms_type='polygon',
                 iou_thr=0.8,
-                half_iou_thr1=0.8,
+                half_iou_thr1=0.1,
                 half_iou_thr2=0.0,
             ),
             out_cfg=dict(
@@ -308,7 +304,7 @@ val_evaluator = [
         # metric=['bbox'],
         # metric=['map_fast', 'proposal_fast', 'bbox_fast'],
         metric=['poly_ap_fast', 'map_fast', 'bbox_fast'],
-        # split_meta_key='continent',
+        split_meta_key='continent',
         backend_args={{_base_.backend_args}},
         out_cfg=dict(
             save_results=False,
@@ -372,7 +368,7 @@ default_hooks = dict(
         type='EMAHook', momentum=0.01, interval=1
     ),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5, score_thr=0.1)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=1, score_thr=0.0)
 )
 
 vis_backends = [
@@ -423,9 +419,10 @@ val_dataloader = dict(
 test_dataloader = dict(
     dataset=dict(
         # ann_file = 'coco_ann_full/filtered_test_global_quartely_2023q2.json',
-        ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
         # ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
         # ann_file = 'coco_ann_global/test_continent_global_quartely_2023q2.json',
+        ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
         min_bbox_w=2
     )
 )

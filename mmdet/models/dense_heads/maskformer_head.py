@@ -524,8 +524,7 @@ class MaskFormerHead(AnchorFreeHead):
 
         # mask_preds
         mask_embed = self.mask_embed(out_dec)
-        all_mask_preds = torch.einsum('lbqc,bchw->lbqhw', mask_embed,
-                                      mask_features)
+        all_mask_preds = torch.einsum('lbqc,bchw->lbqhw', mask_embed, mask_features)
 
         return all_cls_scores, all_mask_preds
 
