@@ -100,7 +100,7 @@ class InferencePipeline:
                     
                     # Submit CPU stage1 task (mosaic_sem_seg + seg2ins + sample_segments)
                     self._submit_cpu_stage1_task(
-                        imgs.cpu(),
+                        imgs,
                         results,
                         img_path,
                         transform,
@@ -143,22 +143,23 @@ class InferencePipeline:
     def _process_cpu_stage1(self, imgs, results, img_path, transform, crs):
         """CPU stage1: mosaic_sem_seg, seg2ins, and sample_segments processing"""
         try:
+            imgs_cpu = imgs.cpu()
             # mosaic_sem_seg processing
             mosaic_start = time.perf_counter()
             with torch.no_grad():
-                results = self.model.predict_mosaic_sem_seg(imgs, results)
+                results = self.model.predict_mosaic_sem_seg(imgs_cpu, results)
             self.time_stats['predict_mosaic_sem_seg'] += time.perf_counter() - mosaic_start
             
             # seg2ins processing
             seg2ins_start = time.perf_counter()
             with torch.no_grad():
-                results = self.model.seg_poly_head.predict_seg2ins(imgs, results)
+                results = self.model.seg_poly_head.predict_seg2ins(imgs_cpu, results)
             self.time_stats['predict_seg2ins'] += time.perf_counter() - seg2ins_start
             
             # sample_segments processing
             sample_start = time.perf_counter()
             with torch.no_grad():
-                results = self.model.seg_poly_head.poly_head.predict_sample_segments(imgs, results)
+                results = self.model.seg_poly_head.poly_head.predict_sample_segments(imgs_cpu, results)
             self.time_stats['predict_sample_segments'] += time.perf_counter() - sample_start
             
             # Add to GPU task queue
