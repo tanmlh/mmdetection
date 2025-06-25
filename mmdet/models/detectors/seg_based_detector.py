@@ -232,7 +232,12 @@ class SegBasedDetector(BaseDetector):
 
             pseudo_meta_infos = [data_sample.metainfo for data_sample in pseudo_data_samples]
             pred_sem_seg = self.seg_head.predict(seg_feats, pseudo_meta_infos, None)
-            pred_sem_seg = pred_sem_seg.cpu()
+            # t0 = time.time()
+            # pred_sem_seg = pred_sem_seg.cpu()
+            pred_sem_seg = pred_sem_seg.to('cpu', non_blocking=True)
+            # t1 = time.time()
+            # print(f'GPU to CPU time: {t1-t0}')
+
             sem_seg_list = [
                 InstanceData(
                     sem_seg=cur_sem_seg[None], offsets=offset[None]
@@ -241,7 +246,8 @@ class SegBasedDetector(BaseDetector):
 
             merged_sem_seg_list.extend(sem_seg_list)
 
-
+        # need to synchronize since merged_sem_seg_list may contain tensors which are still on GPU
+        torch.cuda.synchronize()
         offsets = torch.cat([x.offsets for x in merged_sem_seg_list]).cpu().to(torch.int)
 
         batch_data_samples[0].offsets = offsets
@@ -265,6 +271,7 @@ class SegBasedDetector(BaseDetector):
         merged_sem_seg_list = batch_data_samples[0].merged_sem_seg_list
         offsets = batch_data_samples[0].offsets
         mask_shape = batch_data_samples[0].mask_shape
+
         all_seg_logits = torch.cat([x.sem_seg for x in merged_sem_seg_list], axis=0)
 
         # seg_logits = tanmlh_utils.vectorized_assemble_mask(all_seg_logits, offsets, mask_shape)

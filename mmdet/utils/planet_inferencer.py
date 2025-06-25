@@ -100,7 +100,7 @@ class InferencePipeline:
                     
                     # Submit CPU stage1 task (mosaic_sem_seg + seg2ins + sample_segments)
                     self._submit_cpu_stage1_task(
-                        imgs,
+                        imgs.cpu(),
                         results,
                         img_path,
                         transform,

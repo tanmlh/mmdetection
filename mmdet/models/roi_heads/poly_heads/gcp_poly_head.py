@@ -496,7 +496,6 @@ class GCPPolyHead(nn.Module):
 
     def predict_sample_segments(self, imgs, batch_data_samples):
 
-        seg_logits = batch_data_samples[0].seg_logits
         seg_probs = batch_data_samples[0].seg_probs
         pred_polys = batch_data_samples[0].pred_polys
         scores = batch_data_samples[0].scores
@@ -505,7 +504,7 @@ class GCPPolyHead(nn.Module):
         N = self.poly_cfg.get('num_inter_points', 96)
         t0 = time.time()
 
-        up_imgs = F.interpolate(imgs, (H, W)).cpu()
+        up_imgs = F.interpolate(imgs.cpu(), (H, W))
         mask_feats = torch.cat([seg_probs, up_imgs], dim=1)
 
         sampled_segs, seg_sizes, poly2segs_idxes, segs2poly_idxes = polygon_utils.sample_segments_from_json(
