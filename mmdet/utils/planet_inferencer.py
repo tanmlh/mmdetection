@@ -177,9 +177,9 @@ class InferencePipeline:
     def _process_pending_gpu_tasks(self, pbar):
         """Process pending tasks in GPU queue"""
         while not self.gpu_task_queue.empty():
-            print(f'start to process a {task["type"]} task')
             # Get next GPU task
             task = self.gpu_task_queue.get_nowait()
+            print(f'start to process a {task["type"]} task')
             
             if task['type'] == 'gcp':
                 # GCP processing (GPU)
