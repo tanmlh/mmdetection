@@ -212,29 +212,158 @@ def get_crop_boxes(img_H, img_W, crop_size=(256, 256), stride=(192, 192)):
 
     return boxes
 
-def get_patch_weight(patch_size):
-    choice = 1
+import numpy as np
+import cv2
+
+def get_patch_weight(H, W=None):
+    """
+    Generate a weight matrix for patch fusion
+    
+    Args:
+        H: Height of the weight matrix
+        W: Width of the weight matrix (defaults to H if not provided)
+        
+    Returns:
+        weight_matrix: 2D numpy array of shape (H, W) with weights
+    """
+    # Default to square if W not provided
+    if W is None:
+        W = H
+    
+    choice = 1  # You can make this a parameter if needed
+    
     if choice == 0:
-        step_size = (1.0 - 0.5)/(patch_size/2)
-        a = np.arange(1.0, 0.5, -step_size)
-        b = a[::-1]
-        c = np.concatenate((b,a))
-        ct = c.reshape(-1,1)
-        x = ct*c
-        return x
+        # Create a symmetric weight pattern
+        step_size_y = (1.0 - 0.5) / (H // 2)
+        step_size_x = (1.0 - 0.5) / (W // 2) if W != H else step_size_y
+        
+        # Create vertical weights
+        y_weights = np.concatenate((
+            np.arange(1.0, 0.5, -step_size_y),
+            np.arange(0.5, 1.0, step_size_y)
+        ))[:H]
+        
+        # Create horizontal weights
+        x_weights = np.concatenate((
+            np.arange(1.0, 0.5, -step_size_x),
+            np.arange(0.5, 1.0, step_size_x)
+        ))[:W]
+        
+        # Create 2D weight matrix
+        weight_matrix = np.outer(y_weights, x_weights)
+        return weight_matrix
+    
     elif choice == 1:
+        # Create center-weighted pattern
         min_weight = 0.5
-        step_count = patch_size//4
-        step_size = (1.0 - min_weight)/step_count
-        a = np.ones(shape=(patch_size,patch_size), dtype=np.float32)
-        a = a * min_weight
-        for i in range(1, step_count + 1):
-            a[i:-i, i:-i] += step_size
-        a = cv2.GaussianBlur(a,(5,5),0)
-        return a
+        step_count_y = H // 4
+        step_count_x = W // 4
+        
+        # Create base matrix
+        weight_matrix = np.ones((H, W), dtype=np.float32) * min_weight
+        
+        # Calculate step sizes
+        step_size_y = (1.0 - min_weight) / step_count_y
+        step_size_x = (1.0 - min_weight) / step_count_x
+        
+        # Apply increasing weights towards center
+        for i in range(1, min(step_count_y, step_count_x) + 1):
+            # Calculate current weight
+            current_weight = min_weight + min(i * step_size_y, i * step_size_x)
+            
+            # Update inner rectangle
+            top = i
+            bottom = H - i
+            left = i
+            right = W - i
+            
+            if top < bottom and left < right:
+                weight_matrix[top:bottom, left:right] = current_weight
+        
+        # Apply Gaussian blur for smooth transition
+        kernel_size = min(5, min(H, W) // 2)  # Adjust kernel size based on dimensions
+        if kernel_size > 0 and kernel_size % 2 == 1:  # Kernel size must be odd
+            weight_matrix = cv2.GaussianBlur(weight_matrix, (kernel_size, kernel_size), 0)
+        
+        return weight_matrix
+    
     else:
-        a = np.ones(shape=(patch_size,patch_size), dtype=np.float32)
-        return a
+        # Return uniform weights
+        return np.ones((H, W), dtype=np.float32)
+
+def vectorized_assemble_mask(all_seg_logits, offsets, mask_shape, assemble_type='gaussian_average'):
+    """
+    Vectorized implementation for assembling a large mask with low memory usage
+    
+    Args:
+        all_seg_logits: Tensor of shape (N, C, H_sub, W_sub) containing all sub-masks
+        offsets: Tensor of shape (N, 2) containing (x, y) coordinates for each sub-mask
+        mask_shape: Tuple (H, W) of the full mask dimensions
+        
+    Returns:
+        result: Assembled mask of shape (1, C, H, W)
+    """
+    # Extract dimensions
+    N, C, H_sub, W_sub = all_seg_logits.shape
+    H, W = mask_shape
+    
+    # Create device and dtype for consistent tensor creation
+    device = all_seg_logits.device
+    dtype = all_seg_logits.dtype
+    
+    # Initialize output masks
+    new_sem_seg = torch.zeros(C, H, W, dtype=dtype, device=device)
+    cnt_sem_seg = torch.zeros(1, H, W, dtype=dtype, device=device)
+    
+    if assemble_type == 'gaussian_average':
+        # Precompute weights
+        weights = torch.tensor(get_patch_weight(H_sub, W_sub), device=device, dtype=dtype)
+        weights = weights.view(1, 1, H_sub, W_sub)
+        weighted_seg_logits = all_seg_logits * weights
+
+    elif assemble_type == 'max_prob':
+        # assume the foreground class is 1
+        weighted_seg_logits = all_seg_logits
+        probs = F.softmax(all_seg_logits, dim=1)[:,1]
+
+    else:
+        assert ValueError(f'logits assemble type {assemble_type} is not supported!')
+    
+    # Process each sub-mask sequentially to reduce memory
+    for i in range(N):
+        # Get current offset
+        start_x = offsets[i, 0].item()
+        start_y = offsets[i, 1].item()
+        
+        # Calculate valid region in the full mask
+        x_min = max(start_x, 0)
+        y_min = max(start_y, 0)
+        x_max = min(start_x + W_sub, W)
+        y_max = min(start_y + H_sub, H)
+        
+        # Skip if completely outside
+        if x_min >= x_max or y_min >= y_max:
+            continue
+        
+        # Calculate corresponding region in the sub-mask
+        sub_x_min = max(0, -start_x)
+        sub_y_min = max(0, -start_y)
+        sub_x_max = min(W_sub, W - start_x)
+        sub_y_max = min(H_sub, H - start_y)
+        
+        if assemble_type == 'gaussian_average':
+            # Extract valid part of the sub-mask
+            valid_sub_mask = weighted_seg_logits[i, :, sub_y_min:sub_y_max, sub_x_min:sub_x_max]
+            
+            # Update the full mask
+            new_sem_seg[:, y_min:y_max, x_min:x_max] += valid_sub_mask
+        
+        # Update coverage count
+        cnt_sem_seg[:, y_min:y_max, x_min:x_max] += 1
+    
+    # Normalize and add batch dimension
+    result = (new_sem_seg / (cnt_sem_seg + 1e-8))[None]
+    return result
 
 def mosaic_instance_data(instance_list, offsets, mask_shape=None, pad_shape=None, mask_up_scale=1.0, device='cpu'):
     assert len(instance_list) == len(offsets)
@@ -256,12 +385,48 @@ def mosaic_instance_data(instance_list, offsets, mask_shape=None, pad_shape=None
     if 'segmentations' in instance_list[0]:
         new_polygons = []
 
+
     if 'sem_seg' in instance_list[0]:
-        C = instance_list[0].sem_seg.shape[1]
+        N, C, h, w = instance_list[0].sem_seg.shape
+        mosaic_type = 'gaussian_sum'
+
+        weights = torch.tensor(get_patch_weight(h), device=instance_list[0].sem_seg.device)
         new_sem_seg = instance_list[0].sem_seg.new_zeros(C, *mask_shape)
         cnt_sem_seg = instance_list[0].sem_seg.new_zeros(C, *mask_shape)
 
+        if mosaic_type == 'max_prob':
+            new_sem_seg[0] = 1e9
+
     for i, instance in enumerate(instance_list):
+
+        if 'sem_seg' in instance:
+            start_x, start_y = offsets[i, :2]
+            start_x2 = 0 if start_x >= 0 else -start_x
+            start_y2 = 0 if start_y >= 0 else -start_y
+            end_x2 = w if start_x + w <= mask_shape[1] else mask_shape[1] - start_x
+            end_y2 = h if start_y + h <= mask_shape[0] else mask_shape[0] - start_y
+
+            if mosaic_type == 'gaussian_sum':
+                weighted_sem_seg = instance.sem_seg * weights.view(N,1,h,w)
+                new_sem_seg[:, max(start_y, 0):start_y+h, max(start_x, 0):start_x+w] += \
+                        weighted_sem_seg[0, :, start_y2:end_y2, start_x2:end_x2]
+                cnt_sem_seg[:, max(start_y, 0):start_y+h, max(start_x, 0):start_x+w] += 1
+
+            elif mosaic_type == 'max_prob':
+                new_logits = instance.sem_seg[0]
+                cur_logits = new_sem_seg[:, max(start_y, 0):start_y+h, max(start_x, 0):start_x+w]
+
+                new_probs = F.softmax(new_logits, dim=1)
+                cur_probs = F.softmax(cur_logits, dim=1)
+
+                new_sem_seg[:, max(start_y, 0):start_y+h, max(start_x, 0):start_x+w] = \
+                        torch.where(new_probs[1] > cur_probs[1], new_logits, cur_logits)
+
+
+            else:
+                raise ValueError(f'no such mosaic type {mosaic_type}')
+
+
         if 'scores' in instance:
             new_scores.append(instance['scores'])
 
@@ -283,19 +448,6 @@ def mosaic_instance_data(instance_list, offsets, mask_shape=None, pad_shape=None
                     bboxes[:,:2] += offsets[i, :2]
                     new_bboxes.append(bboxes)
 
-        if 'sem_seg' in instance:
-            N, C, h, w = instance.sem_seg.shape
-            start_x, start_y = offsets[i, :2]
-            start_x2 = 0 if start_x >= 0 else -start_x
-            start_y2 = 0 if start_y >= 0 else -start_y
-            end_x2 = w if start_x + w <= mask_shape[1] else mask_shape[1] - start_x
-            end_y2 = h if start_y + h <= mask_shape[0] else mask_shape[0] - start_y
-
-            weights = torch.tensor(get_patch_weight(h), device=instance.sem_seg.device)
-            weighted_sem_seg = instance.sem_seg * weights.view(N,1,h,w)
-            new_sem_seg[:, max(start_y, 0):start_y+h, max(start_x, 0):start_x+w] += \
-                    weighted_sem_seg[0, :, start_y2:end_y2, start_x2:end_x2]
-            cnt_sem_seg[:, max(start_y, 0):start_y+h, max(start_x, 0):start_x+w] += 1
 
 
         if 'masks' in instance:
@@ -360,7 +512,12 @@ def mosaic_instance_data(instance_list, offsets, mask_shape=None, pad_shape=None
         merged_instance.segmentations = new_polygons
 
     if 'sem_seg' in instance_list[0]:
-        merged_instance.sem_seg = (new_sem_seg / (cnt_sem_seg + 1e-8))[None]
+        if mosaic_type == 'gaussian_sum':
+            merged_instance.sem_seg = (new_sem_seg / (cnt_sem_seg + 1e-8))[None]
+        elif mosaic_type == 'max_prob':
+            merged_instance.sem_seg = new_sem_seg[None]
+        else:
+            raise ValueError(f'no such mosaic type {mosaic_type}')
 
     return merged_instance
 

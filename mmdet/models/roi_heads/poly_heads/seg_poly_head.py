@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 from typing import List, Tuple
 
+import time
 import scipy
 import numpy as np
 import pdb
@@ -207,22 +208,24 @@ class SegPolyHead(BaseModule):
 
         return losses
 
-    def predict(self, imgs, seg_logits, batch_data_samples, **kwargs):
+    def predict_seg2ins(self, imgs,  batch_data_samples):
+
+        seg_logits = batch_data_samples[0].seg_logits
         B, C, H, W = seg_logits.shape
-        assert B == 1
         sem_seg_thr = self.poly_cfg.get('sem_seg_thr', 0.5)
 
         seg_probs = F.softmax(seg_logits, dim=1)
-
         seg_mask = (seg_probs[:,1] > sem_seg_thr).long()
         pixel_data = PixelData(sem_seg=seg_mask)
-        results = batch_data_samples
-        results[0].pred_sem_seg = pixel_data
-        results[0].pred_sem_seg_prob = seg_probs[0, 1:]
+
+        batch_data_samples[0].seg_probs = seg_probs
+        batch_data_samples[0].seg_mask = seg_mask
+        batch_data_samples[0].pred_sem_seg = pixel_data
+        seg_probs = batch_data_samples[0].seg_probs
+        seg_mask = batch_data_samples[0].seg_mask
 
         if self.seg2ins_head is not None:
             pred_polys, scores = self.seg2ins_head.predict(imgs[0], seg_probs[0, 1], batch_data_samples)
-            results = batch_data_samples
 
         else:
             pred_sem_seg = seg_mask.cpu().numpy()[0]
@@ -239,47 +242,48 @@ class SegPolyHead(BaseModule):
 
             scores = torch.tensor([scores[x-1] for x in colors])
 
+        batch_data_samples[0].pred_polys = pred_polys
+        batch_data_samples[0].scores = scores
+
+        return batch_data_samples
+
+
+    def predict_poly(self, imgs, batch_data_samples):
+
         if self.poly_head is not None:
-            mask_feats = torch.cat([seg_probs, imgs], dim=1)
+            batch_data_samples = self.poly_head.predict(imgs, batch_data_samples)
 
-            if self.poly_cfg.get('use_roi_mask_feat', False):
-                bbox_buffer = self.poly_cfg.get('bbox_buffer', 2)
-                pred_poly_masks = PolygonMasks.from_json(pred_polys, H, W)
+        else:
 
-                bounds = torch.tensor(pred_poly_masks.get_bounds(buffer=bbox_buffer))
-                mask_size = self.poly_roi_extractor.roi_layers[0].output_size
+            seg_logits = batch_data_samples[0].seg_logits
+            pred_polys = batch_data_samples[0].pred_polys
+            scores = batch_data_samples[0].scores
+            B, _, H, W = seg_probs.shape
+            seg_instances = InstanceData(segmentations=pred_polys, scores=scores)
+            seg_instances.polygon_masks = PolygonMasks.from_json(pred_polys, H, W)
+            seg_instances.bboxes = torch.tensor(seg_instances.polygon_masks.get_bounds())
+            seg_instances.labels = torch.zeros(len(seg_instances), dtype=torch.long, device=seg_logits.device)
+            batch_data_samples[0].pred_instances = seg_instances
 
-                rois = torch.cat([torch.zeros(len(pred_poly_masks), 1, dtype=torch.long), bounds], dim=-1)
-                roi_feats = self.poly_roi_extractor([mask_feats], rois)
-                mask_feats = self.mask_feat_embed(roi_feats)
-                pred_poly_masks = pred_poly_masks.crop_and_resize(bounds.numpy(), mask_size, torch.arange(len(rois)))
-                pred_polys = pred_poly_masks.to_json()
+        return batch_data_samples
 
-            num_iter = self.poly_cfg.get('num_iter', 1)
+    def predict(self, imgs, batch_data_samples):
+        assert len(imgs) == 1
+        assert len(imgs) == len(batch_data_samples)
 
-            for i in range(num_iter):
-                pred_results = self.poly_head.predict(
-                    pred_polys, W, mask_feats,
-                    # torch.arange(len(pred_polys), dtype=torch.long),
-                    torch.zeros(len(pred_polys), dtype=torch.long),
-                    device=seg_logits.device, return_format='json'
-                )
-                pred_polys = pred_results['simp_polygons']
+        t0 = time.time()
 
-            if self.poly_cfg.get('use_roi_mask_feat', False):
-                if len(pred_polys) > 0:
-                    pred_poly_masks = PolygonMasks.from_json(pred_polys, *mask_size)
-                    pred_poly_masks = pred_poly_masks.paste_by_bboxes(bounds.numpy(), *mask_size)
-                    pred_polys = pred_poly_masks.to_json()
+        batch_data_samples = self.predict_seg2ins(imgs, batch_data_samples)
 
-        seg_instances = InstanceData(segmentations=pred_polys, scores=scores)
-        seg_instances.polygon_masks = PolygonMasks.from_json(pred_polys, H, W)
-        seg_instances.bboxes = torch.tensor(seg_instances.polygon_masks.get_bounds())
-        seg_instances.labels = torch.zeros(len(seg_instances), dtype=torch.long, device=seg_logits.device)
+        t1 = time.time()
 
-        results[0].pred_instances = seg_instances
+        batch_data_samples = self.predict_poly(imgs, batch_data_samples)
 
-        return results
+        t2 = time.time()
+        # print(f'Poly time: {t1-t0} {t2-t1}')
+
+
+        return batch_data_samples
 
 
     def _predict_by_feat_single(self,

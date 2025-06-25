@@ -348,13 +348,13 @@ class MaskFormerHead(AnchorFreeHead):
         ]
         img_metas_list = [batch_img_metas for _ in range(num_dec_layers)]
 
-        # losses_cls, losses_mask, losses_dice = multi_apply(
-        #     self._loss_by_feat_single, all_cls_scores, all_mask_preds,
-        #     batch_gt_instances_list, img_metas_list)
-
         losses_cls, losses_mask, losses_dice = multi_apply(
-            self._loss_by_feat_single, all_cls_scores[-1:], all_mask_preds[-1:],
-            batch_gt_instances_list[-1:], img_metas_list[-1:])
+            self._loss_by_feat_single, all_cls_scores, all_mask_preds,
+            batch_gt_instances_list, img_metas_list)
+
+        # losses_cls, losses_mask, losses_dice = multi_apply(
+        #     self._loss_by_feat_single, all_cls_scores[-1:], all_mask_preds[-1:],
+        #     batch_gt_instances_list[-1:], img_metas_list[-1:])
 
         loss_dict = dict()
         # loss from the last decoder layer

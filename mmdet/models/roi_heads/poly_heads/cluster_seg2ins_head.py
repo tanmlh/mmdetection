@@ -9,7 +9,10 @@ import pdb
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from numba import njit
+from tqdm import tqdm
+import numba
+from numba import njit, types
+from numba.typed import Dict, List
 
 from mmcv.cnn import ConvModule, build_conv_layer, build_upsample_layer
 from mmcv.ops.carafe import CARAFEPack
@@ -32,7 +35,6 @@ from mmdet.utils import tanmlh_utils
 from mmdet.models.layers import Mask2FormerTransformerDecoder, SinePositionalEncoding
 
 import numpy as np
-from numba import njit
 
 # ------------------------------------------------------------------
 # Numba-accelerated union-find functions.
@@ -87,6 +89,9 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
     neigh_r = np.array([-1, 1, 0, 0], dtype=np.int64)
     neigh_c = np.array([0, 0, -1, 1], dtype=np.int64)
 
+    # neigh_r = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int64)
+    # neigh_c = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int64)
+
     for k in range(sorted_ids.shape[0]):
         pid = sorted_ids[k]
         row = idxes[pid, 0]
@@ -99,9 +104,9 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
         for j in range(4):
             r = row + neigh_r[j]
             c = col + neigh_c[j]
-            if r < 0 or r >= grid.shape[0] or c < 0 or c >= grid.shape[1]:
+            if r < 0 or r >= len(grid) or c < 0 or c >= len(grid[0]):
                 continue
-            nb = grid[r, c]
+            nb = grid[r][c]
             if nb == -1:
                 continue
             if visited[nb]:
@@ -118,6 +123,7 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
         if rep_count == 0:
             # No neighbors: valid remains True
             pass
+
         elif rep_count == 1:
             # Single neighbor: check if target cluster is touched
             rep = rep_list[0]
@@ -176,11 +182,13 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
                 # Mark as touched and invalid
                 touched[best_rep] = True
                 valid[pid] = False
+
         visited[pid] = True
 
     # Final path compression
     for i in range(N):
         parent[i] = find_numba(parent, i)
+
     return parent, valid
 
 
@@ -227,41 +235,50 @@ class ClusterSeg2InsHead(BaseModule):
 
     def predict(self, imgs, seg_probs, data_samples):
 
+        import time
+        t0 = time.time()
         C, H, W = imgs.shape
 
         sem_seg_thr = self.poly_cfg.get('sem_seg_thr', 0.5)
         diff_thr = self.poly_cfg.get('diff_thr', 0.1)
         conn_thr = self.poly_cfg.get('conn_thr', 0.8)
+        cluster_mode = self.poly_cfg.get('cluster_mode', 'early_stop')
+
 
         seg_mask = (seg_probs > sem_seg_thr).long()
-        labeled_mask, num_components = scipy.ndimage.label(seg_mask.cpu().numpy())
-        ins_mask = np.zeros_like(labeled_mask)
+        # labeled_mask, num_components = scipy.ndimage.label(seg_mask.cpu().numpy())
+        # ins_mask = np.zeros_like(labeled_mask)
+        ins_mask = np.zeros((seg_mask.shape[0], seg_mask.shape[1]), dtype=np.int64)
+
+        fg_idxes = seg_mask.nonzero()
+        fg_probs = seg_probs[fg_idxes[:,0], fg_idxes[:,1]]
+
+        if len(fg_idxes) ==  0:
+            return [], torch.zeros(0)
 
 
-        # fg_idxes = seg_mask.nonzero()
-        # fg_probs = seg_probs[fg_idxes[:,0], fg_idxes[:,1]]
+        # cluster_idxes_list = self.cluster_by_probs(fg_idxes.cpu().numpy(), fg_probs.cpu().numpy(),
+        #                                            diff_thr, conn_thr, cluster_mode)
+        fg_idxes = fg_idxes.cpu().numpy()
+        cluster_idxes, valid = self.cluster_by_probs(fg_idxes, fg_probs.cpu().numpy(),
+                                                   diff_thr, conn_thr, cluster_mode)
+        if cluster_mode == 'early_stop':
+            ins_mask[fg_idxes[valid,0], fg_idxes[valid,1]] = cluster_idxes[valid] + 1
+        else:
+            ins_mask[fg_idxes[:,0], fg_idxes[:,1]] = cluster_idxes + 1
 
-        import time
-        t0 = time.time()
-
-        conn_comps, _ = self.get_connected_components(labeled_mask)
+        # cluster_cnt = 0
+        # for cluster_idxes in cluster_idxes_list:
+        #     cluster_cnt += 1
+        #     ins_mask[cluster_idxes[:,0], cluster_idxes[:,1]] = cluster_cnt
 
         t1 = time.time()
 
-        # slices = []
-        cluster_cnt = 0
-        seg_probs_np = seg_probs.detach().cpu().numpy()
-        for cur_idxes in conn_comps:
-            cur_probs = seg_probs_np[cur_idxes[:,0], cur_idxes[:,1]]
-            cluster_idxes_list = self.cluster_by_probs(cur_idxes, cur_probs, diff_thr, conn_thr)
-            for cluster_idxes in cluster_idxes_list:
-                cluster_cnt += 1
-                ins_mask[cluster_idxes[:,0], cluster_idxes[:,1]] = cluster_cnt
-
-        t2 = time.time()
         _, slices = self.get_connected_components(ins_mask)
 
         pred_polys, colors = polygon_utils.polygonize_sliced_masks(ins_mask, slices)
+
+        t2 = time.time()
 
         # pred_polys, colors = polygon_utils.polygonize_mask(
         #     torch.tensor(ins_mask).to(torch.int), mode='simple_mask', scale=1.
@@ -277,13 +294,14 @@ class ClusterSeg2InsHead(BaseModule):
         t3 = time.time()
 
         # print(f'{ins_mask.max()} {len(pred_polys)} {labeled_mask.max()}')
-        # print(f'{t1-t0} {t2-t1} {t3-t2}')
+        # print(f'Cluster time: {t1-t0} {t2-t1} {t3-t2}')
 
         return pred_polys, scores
 
 
+
     @staticmethod
-    def cluster_by_probs(idxes, probs, diff_thr=0.1, conn_thr=0.6):
+    def cluster_by_probs(idxes, probs, diff_thr=0.1, conn_thr=0.6, cluster_mode='early_stop'):
         """
         idxes: numpy array of shape (N,2) of pixel coordinates (row, col).
         probs: numpy array of shape (N,1) of pixel probabilities.
@@ -291,30 +309,111 @@ class ClusterSeg2InsHead(BaseModule):
         
         Returns a list of clusters, where each cluster is a numpy array of pixel coordinates.
         """
-        idxes = np.ascontiguousarray(idxes.astype(np.int64))
-        # Flatten probabilities to 1D and ensure correct type.
-        probs = np.ascontiguousarray(probs.flatten().astype(np.float64))
+
+        from numba import njit, types
+        from numba.typed import Dict, List
+        import numpy as np
+
+        # 如果数据集很大（>100万元素），使用两遍遍历：
+        @njit
+        def group_by_parent(parent, idxes, valid, cluster_mode):
+            # 创建一个映射：组ID -> 输出列表位置
+            group_to_index = dict()
+            group_to_cnt = dict()
+            cur_group_cnt = dict()
+            cnt = 0
+            N = len(parent)
+            
+            for i in range(N):
+                rep = parent[i]
+                if cluster_mode == 1 and not valid[i]:
+                    continue
+
+                if rep not in group_to_index:
+                    group_to_index[rep] = cnt
+                    group_to_cnt[rep] = 0
+                    cur_group_cnt[rep] = 0
+                    cnt += 1
+
+                group_to_cnt[rep] += 1
+
+            results = dict()
+            # 将每个组转换为数组
+            for i in range(N):
+                rep = parent[i]
+                if cluster_mode == 1 and not valid[i]:
+                    continue
+                if not group_to_index[rep] in results:
+                    lst = np.zeros((group_to_cnt[rep], 2), dtype=np.int64)
+                    results[group_to_index[rep]] = lst
+                else:
+                    lst = results[group_to_index[rep]]
+
+                lst[cur_group_cnt[rep], 0] = idxes[i][0]
+                lst[cur_group_cnt[rep], 1] = idxes[i][1]
+
+                cur_group_cnt[rep] += 1
+
+            return results
+
+        @njit
+        def create_grid(idxes, max_row, max_col):
+            N = idxes.shape[0]  # 获取idxes的行数
+            grid = np.full((max_row, max_col), -1, dtype=np.int64)  # 初始化全-1的网格
+            
+            for i in range(N):
+                r = idxes[i, 0]  # 直接使用整数索引（无需int转换）
+                c = idxes[i, 1]
+                grid[r, c] = i   # 在对应位置记录索引i
+            
+            return grid
+
+        import time
+        t0 = time.time()
 
         N = idxes.shape[0]
         max_row = int(np.max(idxes[:, 0])) + 1
         max_col = int(np.max(idxes[:, 1])) + 1
-        grid = -1 * np.ones((max_row, max_col), dtype=np.int64)
-        for i in range(N):
-            r = int(idxes[i, 0])
-            c = int(idxes[i, 1])
-            grid[r, c] = i
-        sorted_ids = np.argsort(-probs)
-        parent, valid = cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr)
-        clusters_dict = {}
 
+
+        # grid = create_grid(idxes, max_row, max_col)
+        grid = np.full((max_row, max_col), -1, dtype=np.int64)
+        grid[idxes[:, 0], idxes[:, 1]] = np.arange(len(idxes))
+
+        # for i in range(N):
+        #     r = int(idxes[i, 0])
+        #     c = int(idxes[i, 1])
+        #     grid[r][c] = i
+
+        t1 = time.time()
+
+        sorted_ids = np.argsort(-probs)
+
+        t2 = time.time()
+        parent, valid = cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr)
+        t3 = time.time()
+
+        unique_vals, inverse = np.unique(parent, return_inverse=True)
+        cluster_idxes = inverse.astype(np.int64)
+
+        # clusters_dict = group_by_parent(parent, idxes, valid, cluster_mode == 'early_stop')
+        # clusters_list = list(clusters_dict.values())
+
+        t4 = time.time()
+        # print(f'cluster by probs time: {t1-t0} {t2-t1} {t3-t2} {t4-t3}')
+        return cluster_idxes, valid
+
+        clusters_dict = {}
         for i in range(N):
             rep = parent[i]
-            if not valid[i]:
+            if not valid[i] and cluster_mode == 'early_stop':
                 continue
             if rep in clusters_dict:
                 clusters_dict[rep].append(idxes[i])
             else:
                 clusters_dict[rep] = [idxes[i]]
+
         clusters_list = [np.array(clusters_dict[k]) for k in clusters_dict]
+
         return clusters_list
 

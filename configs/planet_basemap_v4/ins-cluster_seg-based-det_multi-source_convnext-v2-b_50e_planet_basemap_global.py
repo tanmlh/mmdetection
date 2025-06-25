@@ -56,7 +56,7 @@ model = dict(
             num_max_sample=200,
             train_seg2ins_head=False,
             train_poly_head=False,
-            diff_thr=0.05
+            diff_thr=0.1
         ),
         seg2ins_head=dict(
             type='ClusterSeg2InsHead',
@@ -83,7 +83,7 @@ model = dict(
             filter_border_width = 0,
             sem_seg_type='sem_seg',
             sem_seg_thr=0.4,
-            eval_proposal=False
+            eval_proposal=False,
         ),
         post_cfg = dict(
             type='InstancePostProcessor',
@@ -109,13 +109,7 @@ model = dict(
 val_evaluator = [
     dict(
         type='PlanetMetric',
-        # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_sample_europe2/coco_ann/upscale-global_quartely_2023q2.json',
-        # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_full/upscale_test_global_quartely_2023q2.json',
-        # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_full/upscale_merged_filtered_test_dp_global_quartely_2023q2.json',
         ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_global/upscale_test_continent_global_quartely_2023q2.json',
-        # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_full/upscale_merged_test_continent_global_quartely_2023q2.json'
-        # metric=['bbox'],
-        # metric=['map_fast', 'proposal_fast', 'bbox_fast'],
         # metric=['poly_ap_fast', 'map_fast', 'bbox_fast'],
         metric=['poly_ap_fast'],
         # split_meta_key='continent',
@@ -228,22 +222,13 @@ train_dataloader = dict(
 val_dataloader = dict(
     batch_size=1,
     dataset=dict(
-        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
-        ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
+        ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
         min_bbox_w=2
     )
 )
 test_dataloader = dict(
     dataset=dict(
-        # ann_file = 'coco_ann_full/filtered_test_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_global/test_continent_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
-        ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
+        ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
         min_bbox_w=2
     )
 )

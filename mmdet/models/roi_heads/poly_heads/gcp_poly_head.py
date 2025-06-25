@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import time
 import copy
 from typing import Dict, List, Optional, Tuple, Union
 import pdb
@@ -16,6 +17,7 @@ from mmcv.cnn import Conv2d
 from mmcv.ops import point_sample
 from mmengine.model import ModuleList, caffe2_xavier_init
 from mmengine.structures import InstanceData, PixelData
+from mmdet.structures.mask import PolygonMasks
 from torch import Tensor
 
 from mmdet.registry import MODELS, TASK_UTILS
@@ -193,7 +195,7 @@ class GCPPolyHead(nn.Module):
 
             angles = []
             gt_angles = []
-            eps = 1e-6
+            eps = 1e-5
             num_base_angles = self.poly_cfg.get('num_base_angles', 16)
             base_angles = tanmlh_utils.generate_angles(num_base_angles).to(device)
 
@@ -272,6 +274,55 @@ class GCPPolyHead(nn.Module):
 
         return losses
 
+    @staticmethod
+    def vectorized_normalization(poly_pred):
+        """
+        Vectorized normalization of polygon coordinates
+
+        Args:
+            poly_pred: Tensor of shape (K, N, 2) representing K polygons with N points
+        
+        Returns:
+            Normalized polygon tensor of shape (K, N, 2)
+        """
+        # Step 1: Create validity mask (points with both coordinates >= 0)
+        poly_valid_mask = (poly_pred >= 0).all(dim=-1)  # (K, N)
+
+        # Step 2: Compute min and max values for each polygon
+        # Create mask for valid points only
+        valid_mask = poly_valid_mask.unsqueeze(-1)  # (K, N, 1)
+
+        # For min computation: replace invalid points with a large value
+        large_value = 1e9
+        min_input = torch.where(valid_mask, poly_pred, large_value)
+        minv = min_input.min(dim=1)[0]  # (K, 2)
+
+        # For max computation: replace invalid points with a small value
+        small_value = -1e9
+        max_input = torch.where(valid_mask, poly_pred, small_value)
+        maxv = max_input.max(dim=1)[0]  # (K, 2)
+
+        # Step 3: Compute max side length for each polygon
+        ranges = maxv - minv  # (K, 2)
+        max_w = ranges.max(dim=1)[0]  # (K,)
+
+        # Handle polygons with no valid points
+        has_valid = poly_valid_mask.any(dim=1)  # (K,)
+        safe_max_w = torch.where(has_valid, max_w, torch.ones_like(max_w))
+        safe_minv = torch.where(has_valid.unsqueeze(1), minv, torch.zeros_like(minv))
+
+        # Step 4: Normalize coordinates
+        # Center and scale
+        centered = (poly_pred - safe_minv.unsqueeze(1)) / safe_max_w.unsqueeze(-1).unsqueeze(-1)
+
+        # Shift to [-1, 1] range
+        normalized = (centered - 0.5) * 2
+
+        # Set invalid points to -2
+        normalized = torch.where(valid_mask, normalized, -2.0)
+
+        return normalized
+
     def forward(self, poly_pred, W, mask_feat=None, query_feat=None, batch_idxes=None):
 
         results = dict()
@@ -279,9 +330,7 @@ class GCPPolyHead(nn.Module):
         K, N, _ = poly_pred.shape
         C = self.feat_channels
 
-        norm_poly_pred = (poly_pred / W - 0.5) * 2
-        poly_valid_mask = (poly_pred >= 0).all(dim=-1)
-
+        """
         centerized_poly_pred = []
         for cur_poly_pred in poly_pred:
             cur_poly_mask = (cur_poly_pred >= 0).all(dim=-1)
@@ -297,13 +346,15 @@ class GCPPolyHead(nn.Module):
             centerized_poly_pred.append(cent_pred)
 
         centerized_poly_pred = torch.stack(centerized_poly_pred)
+        """
+        centerized_poly_pred = self.vectorized_normalization(poly_pred)
+
         poly_feat = self.poly_embed(centerized_poly_pred).view(K, N, C)
 
         if mask_feat is not None:
+            norm_poly_pred = (poly_pred / W - 0.5) * 2
             point_feat_list = []
             b, c, h, w = mask_feat.shape
-
-
             for i, cur_mask_feat in enumerate(mask_feat):
                 cur_norm_poly_pred = norm_poly_pred[batch_idxes == i].unsqueeze(0)
                 _, cur_K, cur_N, _ = cur_norm_poly_pred.shape
@@ -319,9 +370,10 @@ class GCPPolyHead(nn.Module):
                     # unfolded = unfolded.view(b, c*kernel_size**2, h, w)
 
                 point_feat = F.grid_sample(
-                    cur_mask_feat[None], cur_norm_poly_pred, align_corners=True
+                    cur_mask_feat[None], cur_norm_poly_pred.to(cur_mask_feat.device),
+                    align_corners=True
                 )
-                point_feat = point_feat.permute(0,2,3,1).squeeze(0)
+                point_feat = point_feat.permute(0,2,3,1).squeeze(0).to(poly_pred.device)
 
                 if self.poly_cfg.get('unfold_cfg', {}) != {}:
                     point_feat = point_feat.reshape(cur_K, cur_N, kernel_size**2 * c)
@@ -427,33 +479,70 @@ class GCPPolyHead(nn.Module):
         return targets
 
 
-    def predict(self, poly_pred_jsons, W, mask_feat=None, batch_idxes=None, device='cpu',
-                return_format='coco'):
+    def to_numba_nested_list(self, data):
+        from numba.typed import List
+        """
+        递归地将 Python 的嵌套 list（任意深度）转换为 numba.typed.List。
+        底层必须是原生可支持的类型（如 int、float），不支持 dict/对象等。
+        """
+        if isinstance(data, list):
+            out = List()
+            for item in data:
+                out.append(self.to_numba_nested_list(item))
+            return out
+        else:
+            # 基本类型（int, float, bool…）直接返回
+            return data
+
+    def predict_sample_segments(self, imgs, batch_data_samples):
+
+        seg_logits = batch_data_samples[0].seg_logits
+        seg_probs = batch_data_samples[0].seg_probs
+        pred_polys = batch_data_samples[0].pred_polys
+        scores = batch_data_samples[0].scores
+        B, _, H, W = seg_probs.shape
 
         N = self.poly_cfg.get('num_inter_points', 96)
-        num_max_rings = self.poly_cfg.get('num_max_rings', 5000)
+        t0 = time.time()
 
-        pred_results = {}
+        up_imgs = F.interpolate(imgs, (H, W)).cpu()
+        mask_feats = torch.cat([seg_probs, up_imgs], dim=1)
 
         sampled_segs, seg_sizes, poly2segs_idxes, segs2poly_idxes = polygon_utils.sample_segments_from_json(
-            poly_pred_jsons, interval=self.poly_cfg.get('step_size'),
+            pred_polys, interval=self.poly_cfg.get('step_size'),
             seg_len=N, stride=self.poly_cfg.get('stride_size', 64),
             num_min_bins=self.poly_cfg.get('num_min_bins', 8),
             num_bins=self.poly_cfg.get('num_bins', None),
         )
         sampled_segs = sampled_segs.astype(np.float32)
 
+        batch_data_samples[0].sampled_segs = sampled_segs
+        batch_data_samples[0].poly2segs_idxes = poly2segs_idxes
+        batch_data_samples[0].seg_sizes = seg_sizes
+        batch_data_samples[0].segs2poly_idxes = segs2poly_idxes
+
+        return batch_data_samples
+
+    def predict_gcp(self, imgs, batch_data_samples):
+
+        num_max_rings = self.poly_cfg.get('num_max_rings', 5000)
+        pred_polys = batch_data_samples[0].pred_polys
+        sampled_segs = batch_data_samples[0].sampled_segs
+        segs2poly_idxes = batch_data_samples[0].segs2poly_idxes
+        batch_idxes = batch_data_samples[0].get(
+            'batch_idxes', torch.zeros(len(pred_polys), dtype=torch.long)
+        )
+        seg_probs = batch_data_samples[0].seg_probs
+        B, _, H, W = seg_probs.shape
 
         if len(sampled_segs) > 0:
-            poly_pred = torch.from_numpy(sampled_segs).to(device).float()
 
-            b, c, h, w = mask_feat.shape
-            # if self.poly_cfg.get('unfold_cfg', {}) != {}:
-            #     unfold_cfg = self.poly_cfg['unfold_cfg']
-            #     kernel_size = unfold_cfg.get('kernel_size', 7)
-            #     unfolded = F.unfold(mask_feat, **unfold_cfg)
-            #     unfolded = unfolded.view(b, c*kernel_size**2, h, w)
-            #     mask_feat = unfolded
+            up_imgs = F.interpolate(imgs, (H, W)).cpu()
+            mask_feats = torch.cat([seg_probs, up_imgs], dim=1)
+
+            poly_pred = torch.from_numpy(sampled_segs).to(imgs.device).float()
+
+            b, c, h, w = mask_feats.shape
 
             poly_pred_list = poly_pred.split(num_max_rings)
             segs2poly_idxes_list = torch.tensor(segs2poly_idxes[:,0]).split(num_max_rings)
@@ -461,32 +550,53 @@ class GCPPolyHead(nn.Module):
             prim_reg_pred_list = []
             for i, (poly_pred, segs2poly_idxes) in enumerate(zip(poly_pred_list, segs2poly_idxes_list)):
                 dp_pred_results = self.forward(
-                    poly_pred, W, mask_feat=mask_feat,
+                    poly_pred, W, mask_feat=mask_feats,
                     batch_idxes=batch_idxes[segs2poly_idxes] if batch_idxes is not None else None
                 )
                 prim_reg_pred = dp_pred_results['prim_reg_pred']
                 prim_reg_pred_list.append(prim_reg_pred)
 
             prim_reg_pred = torch.cat(prim_reg_pred_list)
-            prim_cls_pred = torch.zeros_like(prim_reg_pred).cpu()
+            batch_data_samples[0].prim_reg_pred = prim_reg_pred
 
+        return batch_data_samples
 
-            rings, poly2ring_idxes, others = polygon_utils.assemble_segments(
-                prim_reg_pred.cpu(), poly2segs_idxes, seg_sizes,
+    def predict_assemble_segments(self, imgs, batch_data_samples):
+        sampled_segs = batch_data_samples[0].sampled_segs
+        poly2segs_idxes = batch_data_samples[0].poly2segs_idxes
+        seg_sizes = batch_data_samples[0].seg_sizes
+
+        if len(sampled_segs) > 0:
+            prim_reg_pred = batch_data_samples[0].prim_reg_pred
+
+            poly2segs_idxes = self.to_numba_nested_list(poly2segs_idxes)
+            seg_sizes = self.to_numba_nested_list(seg_sizes)
+            rings, poly2ring_idxes = polygon_utils.assemble_segments_cpp(
+                prim_reg_pred.cpu().numpy(), poly2segs_idxes, seg_sizes,
                 length=self.poly_cfg.get('num_inter_points', 96),
                 stride=self.poly_cfg.get('stride_size', 64),
-                prim_cls_pred=prim_cls_pred,
-                sampled_rings=sampled_segs
             )
 
-            pred_results['pred_rings'] = rings
-            pred_results['sampled_rings'] = others['sampled_rings']
+            rings = [torch.tensor(ring).to(prim_reg_pred.device) for ring in rings]
+            batch_data_samples[0].rings = rings
+            batch_data_samples[0].poly2ring_idxes = poly2ring_idxes
 
-            rings = [ring.to(poly_pred.device) for ring in rings]
+        return batch_data_samples
+
+    def predict_dp(self, imgs, batch_data_samples):
+
+        rings = batch_data_samples[0].get('rings', None)
+        scores = batch_data_samples[0].scores
+        seg_probs = batch_data_samples[0].seg_probs
+        B, _, H, W = seg_probs.shape
+
+        if rings is not None:
+
+            poly2ring_idxes = batch_data_samples[0].poly2ring_idxes
+            return_format = self.poly_cfg.get('poly_return_format', 'json')
 
             simp_rings = polygon_utils.simplify_rings_dp(
-                rings, lam=self.poly_cfg.get('lam', 4), device=device,
-                ref_rings=sampled_rings if self.poly_cfg.get('use_ref_rings', False) else None,
+                rings, lam=self.poly_cfg.get('lam', 4), device=rings[0].device,
                 drop_last=False, max_step_size=self.poly_cfg.get('max_step_size', 50)
             )
 
@@ -496,11 +606,42 @@ class GCPPolyHead(nn.Module):
                 simp_rings, poly2ring_idxes, format=return_format
             )
 
-            pred_results['simp_polygons'] = simp_polygons
-
+            # batch_data_samples[0].simp_polygons = simp_polygons
         else:
-            pred_results['simp_polygons'] = []
+            simp_polygons = []
 
-        return pred_results
+        seg_instances = InstanceData(segmentations=simp_polygons, scores=scores)
+        seg_instances.polygon_masks = PolygonMasks.from_json(simp_polygons, H, W)
+        seg_instances.bboxes = torch.tensor(seg_instances.polygon_masks.get_bounds())
+        seg_instances.labels = torch.zeros(len(seg_instances), dtype=torch.long)
+
+        batch_data_samples[0].pred_instances = seg_instances
+
+        return batch_data_samples
+
+
+    def predict(self, imgs, batch_data_samples, device='cpu'):
+
+        t0 = time.time()
+
+        batch_data_samples = self.predict_sample_segments(imgs, batch_data_samples)
+
+        t1 = time.time()
+
+        batch_data_samples = self.predict_gcp(imgs, batch_data_samples)
+
+        t2 = time.time()
+
+        batch_data_samples = self.predict_assemble_segments(imgs, batch_data_samples)
+
+        t3 = time.time()
+
+        batch_data_samples = self.predict_dp(imgs, batch_data_samples)
+
+        t4 = time.time()
+
+        print(f'{t1-t0} {t2-t1} {t3-t2} {t4-t3}')
+
+        return batch_data_samples
 
 

@@ -229,10 +229,7 @@ train_dataloader = dict(
 val_dataloader = dict(
     batch_size=1,
     dataset=dict(
-        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
-        ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
+        ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
         min_bbox_w=2
     )
 )
@@ -240,13 +237,7 @@ test_dataloader = dict(
     num_workers=1,
     persistent_workers=False,
     dataset=dict(
-        # ann_file = 'coco_ann_full/filtered_test_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_global/test_continent_global_quartely_2023q2.json',
-        # ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
-        ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
+        ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
         min_bbox_w=2
     )
 )

@@ -1,0 +1,317 @@
+import queue
+import threading
+import concurrent.futures
+import torch
+from tqdm import tqdm
+import os
+import time
+import mmdet.utils.tanmlh_polygon_utils as polygon_utils
+
+class InferencePipeline:
+    def __init__(self, model, num_images, save_cfg, cpu_workers=None):
+        """
+        Main thread-driven inference pipeline with all GPU operations in main thread
+        
+        Args:
+            model: Inference model
+            num_images: Maximum number of images to process
+            save_cfg: Result saving configuration
+            cpu_workers: Number of CPU worker threads
+        """
+        self.model = model
+        self.num_images = num_images
+        self.save_cfg = save_cfg
+        self.cpu_workers = cpu_workers or max(1, os.cpu_count() - 1)
+        
+        # Queues for task coordination
+        self.gpu_task_queue = queue.Queue()    # GPU task queue
+        
+        # State tracking
+        self.submitted_count = 0
+        self.completed_count = 0
+        self.active_tasks = 0  # Tracks active in-process tasks
+        
+        # Time statistics
+        self.time_stats = {
+            'total': 0.0,
+            'data_preprocessor': 0.0,
+            'predict_sem_seg': 0.0,
+            'predict_mosaic_sem_seg': 0.0,
+            'predict_seg2ins': 0.0,
+            'predict_sample_segments': 0.0,
+            'predict_gcp': 0.0,
+            'predict_assemble_segments': 0.0,
+            'predict_dp': 0.0
+        }
+
+    def run(self, data_loader):
+        """
+        Run the main thread-driven inference pipeline
+        
+        Args:
+            data_loader: Data loader object
+            
+        Returns:
+            Number of images processed
+        """
+        # Create output directory if saving enabled
+        if self.save_cfg.get('save_results', False):
+            os.makedirs(self.save_cfg['out_dir'], exist_ok=True)
+        
+        # Create thread pool for CPU tasks
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.cpu_workers) as executor:
+            self.executor = executor
+            
+            # Start total time tracking
+            total_start = time.perf_counter()
+            
+            # Create progress bar
+            with tqdm(total=self.num_images, desc='Processing images (0 active tasks)') as pbar:
+                # Process all images
+                for idx, data_batch in enumerate(data_loader):
+                    if idx >= self.num_images:
+                        break
+                    
+                    # Update progress description
+                    pbar.set_description(f"Processing images ({self.active_tasks} active tasks)")
+                    
+                    # Process pending GPU tasks
+                    self._process_pending_gpu_tasks(pbar)
+                    
+                    # Step 1: Data preprocessing
+                    preprocess_start = time.perf_counter()
+                    with torch.no_grad():
+                        data = self.model.data_preprocessor(data_batch)
+                        imgs = data['inputs']
+                        batch_data_samples = data['data_samples']
+                    self.time_stats['data_preprocessor'] += time.perf_counter() - preprocess_start
+                    
+                    # Step 2: Semantic segmentation (GPU)
+                    semseg_start = time.perf_counter()
+                    with torch.no_grad():
+                        results = self.model.predict_sem_seg(imgs, batch_data_samples)
+                    self.time_stats['predict_sem_seg'] += time.perf_counter() - semseg_start
+                    # pbar.update(1)  # Update progress bar (once per completed image)
+                    
+                    # Extract metadata
+                    img_path = batch_data_samples[0].metainfo['img_path']
+                    transform = batch_data_samples[0].metainfo['tif_meta']['transform']
+                    crs = batch_data_samples[0].metainfo['tif_meta']['crs']
+                    
+                    # Submit CPU stage1 task (mosaic_sem_seg + seg2ins + sample_segments)
+                    self._submit_cpu_stage1_task(
+                        imgs,
+                        results,
+                        img_path,
+                        transform,
+                        crs
+                    )
+                    self.submitted_count += 1
+                    self.active_tasks += 1
+                
+                # Process remaining tasks after all images submitted
+                while self.completed_count < self.submitted_count:
+                    # Update progress description
+                    pbar.set_description(f"Finishing processing ({self.active_tasks} active tasks)")
+                    
+                    # Process GPU tasks
+                    self._process_pending_gpu_tasks(pbar)
+                    
+                    # Brief pause if no tasks to process
+                    if self.gpu_task_queue.empty():
+                        time.sleep(0.01)
+            
+            # Calculate total time
+            self.time_stats['total'] = time.perf_counter() - total_start
+        
+        # Print time statistics
+        self._print_time_statistics()
+        
+        return self.completed_count
+    
+    def _submit_cpu_stage1_task(self, imgs, results, img_path, transform, crs):
+        """Submit CPU stage1 task to thread pool"""
+        self.executor.submit(
+            self._process_cpu_stage1, 
+            imgs,
+            results,
+            img_path,
+            transform,
+            crs
+        )
+    
+    def _process_cpu_stage1(self, imgs, results, img_path, transform, crs):
+        """CPU stage1: mosaic_sem_seg, seg2ins, and sample_segments processing"""
+        try:
+            # mosaic_sem_seg processing
+            mosaic_start = time.perf_counter()
+            with torch.no_grad():
+                results = self.model.predict_mosaic_sem_seg(imgs, results)
+            self.time_stats['predict_mosaic_sem_seg'] += time.perf_counter() - mosaic_start
+            
+            # seg2ins processing
+            seg2ins_start = time.perf_counter()
+            with torch.no_grad():
+                results = self.model.seg_poly_head.predict_seg2ins(imgs, results)
+            self.time_stats['predict_seg2ins'] += time.perf_counter() - seg2ins_start
+            
+            # sample_segments processing
+            sample_start = time.perf_counter()
+            with torch.no_grad():
+                results = self.model.seg_poly_head.poly_head.predict_sample_segments(imgs, results)
+            self.time_stats['predict_sample_segments'] += time.perf_counter() - sample_start
+            
+            # Add to GPU task queue
+            self.gpu_task_queue.put({
+                'type': 'gcp',
+                'imgs': imgs,
+                'results': results,
+                'img_path': img_path,
+                'transform': transform,
+                'crs': crs
+            })
+        except Exception as e:
+            print(f"CPU stage1 task error: {e}")
+            self.active_tasks -= 1  # Reduce active task count
+    
+    def _process_pending_gpu_tasks(self, pbar):
+        """Process pending tasks in GPU queue"""
+        while not self.gpu_task_queue.empty():
+            # Get next GPU task
+            task = self.gpu_task_queue.get_nowait()
+            
+            if task['type'] == 'gcp':
+                # GCP processing (GPU)
+                gcp_start = time.perf_counter()
+                with torch.no_grad():
+                    gcp_results = self.model.seg_poly_head.poly_head.predict_gcp(
+                        task['imgs'], 
+                        task['results']
+                    )
+                self.time_stats['predict_gcp'] += time.perf_counter() - gcp_start
+                
+                # Submit CPU stage2 task
+                self._submit_cpu_stage2_task(
+                    task['imgs'],
+                    gcp_results,
+                    task['img_path'],
+                    task['transform'],
+                    task['crs']
+                )
+            
+            elif task['type'] == 'dp':
+                # DP processing (GPU)
+                dp_start = time.perf_counter()
+                with torch.no_grad():
+                    dp_results = self.model.seg_poly_head.poly_head.predict_dp(
+                        task['imgs'], 
+                        task['results']
+                    )
+                self.time_stats['predict_dp'] += time.perf_counter() - dp_start
+                
+                # Submit save results task to background
+                self.executor.submit(
+                    self._save_results,
+                    dp_results,
+                    task['img_path'],
+                    task['transform'],
+                    task['crs']
+                )
+                
+                # Update completion state
+                self.completed_count += 1
+                self.active_tasks -= 1
+                pbar.update(1)  # Update progress bar (once per completed image)
+    
+    def _submit_cpu_stage2_task(self, imgs, results, img_path, transform, crs):
+        """Submit CPU stage2 task to thread pool"""
+        self.executor.submit(
+            self._process_cpu_stage2, 
+            imgs,
+            results,
+            img_path,
+            transform,
+            crs
+        )
+    
+    def _process_cpu_stage2(self, imgs, results, img_path, transform, crs):
+        """CPU stage2: assemble_segments processing"""
+        try:
+            # assemble_segments processing
+            assemble_start = time.perf_counter()
+            with torch.no_grad():
+                results = self.model.seg_poly_head.poly_head.predict_assemble_segments(imgs, results)
+            self.time_stats['predict_assemble_segments'] += time.perf_counter() - assemble_start
+            
+            # Add to GPU task queue
+            self.gpu_task_queue.put({
+                'type': 'dp',
+                'imgs': imgs,
+                'results': results,
+                'img_path': img_path,
+                'transform': transform,
+                'crs': crs
+            })
+        except Exception as e:
+            print(f"CPU stage2 task error: {e}")
+            self.active_tasks -= 1  # Reduce active task count
+    
+    def _save_results(self, results, img_path, transform, crs):
+        """Save results to GeoJSON file in a background thread"""
+        if not self.save_cfg.get('save_results', False):
+            return
+            
+        try:
+            # Extract polygons
+            poly_jsons = results[0].pred_instances['segmentations']
+            
+            # Create output path
+            file_name = os.path.basename(img_path).split('.')[0]
+            out_dir = self.save_cfg['out_dir']
+            out_path = os.path.join(out_dir, file_name + '.geojson')
+            out_scale = self.save_cfg.get('out_poly_scale', 1.0)
+            
+            # Save polygons
+            polygon_utils.save_polygons(
+                poly_jsons, 
+                transform, 
+                crs, 
+                out_path, 
+                out_scale
+            )
+        except Exception as e:
+            print(f"Error saving results for {img_path}: {e}")
+    
+    def _print_time_statistics(self):
+        """Print detailed time usage statistics"""
+        print("\nTime Usage Statistics:")
+        print("=" * 50)
+        print(f"{'Total processing time':<30}: {self.time_stats['total']:.2f} seconds")
+        print(f"{'Data preprocessing':<30}: {self.time_stats['data_preprocessor']:.2f} seconds")
+        print(f"{'Semantic segmentation':<30}: {self.time_stats['predict_sem_seg']:.2f} seconds")
+        print(f"{'Mosaic sem seg':<30}: {self.time_stats['predict_mosaic_sem_seg']:.2f} seconds")
+        print(f"{'Seg2ins processing':<30}: {self.time_stats['predict_seg2ins']:.2f} seconds")
+        print(f"{'Sample segments':<30}: {self.time_stats['predict_sample_segments']:.2f} seconds")
+        print(f"{'GCP prediction':<30}: {self.time_stats['predict_gcp']:.2f} seconds")
+        print(f"{'Assemble segments':<30}: {self.time_stats['predict_assemble_segments']:.2f} seconds")
+        print(f"{'DP prediction':<30}: {self.time_stats['predict_dp']:.2f} seconds")
+        print("=" * 50)
+
+# Usage example
+if __name__ == "__main__":
+    # Assume model, data_loader, and arguments are defined
+    save_cfg = {
+        'save_results': True,
+        'out_dir': './output',
+        'out_poly_scale': 1.0
+    }
+    
+    pipeline = InferencePipeline(
+        model=model,
+        num_images=100,
+        save_cfg=save_cfg,
+        cpu_workers=4
+    )
+    
+    processed_count = pipeline.run(data_loader)
+    print(f"Successfully processed {processed_count} images")

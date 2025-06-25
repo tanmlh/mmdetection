@@ -136,22 +136,23 @@ test_evaluator = val_evaluator
 # optimizer
 embed_multi = dict(lr_mult=1.0, decay_mult=0.0)
 optim_wrapper = dict(
-    type='OptimWrapper',
+    type='DeepSpeedOptimWrapper',
     optimizer=dict(
         type='AdamW',
         lr=0.0001,
         weight_decay=0.05,
         eps=1e-8,
         betas=(0.9, 0.999)),
-    paramwise_cfg=dict(
-        custom_keys={
-            'backbone': dict(lr_mult=0.1, decay_mult=1.0),
-            'query_embed': embed_multi,
-            'query_feat': embed_multi,
-            'level_embed': embed_multi,
-        },
-        norm_decay_mult=0.0),
-    clip_grad=dict(max_norm=0.01, norm_type=2))
+    # paramwise_cfg=dict(
+    #     custom_keys={
+    #         'backbone': dict(lr_mult=0.1, decay_mult=1.0),
+    #         'query_embed': embed_multi,
+    #         'query_feat': embed_multi,
+    #         'level_embed': embed_multi,
+    #     },
+    #     norm_decay_mult=0.0),
+    # clip_grad=dict(max_norm=0.01, norm_type=2)
+)
 
 max_epochs=50
 param_scheduler = [
@@ -180,9 +181,9 @@ default_hooks = dict(
         save_last=True,
         max_keep_ckpts=10,
         interval=1),
-    ema=dict(
-        type='EMAHook', momentum=0.01, interval=1
-    ),
+    # ema=dict(
+    #     type='EMAHook', momentum=0.01, interval=1
+    # ),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
     visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5, score_thr=0.1)
 )
@@ -193,14 +194,14 @@ vis_backends = [
         init_kwargs=dict(
             project = 'planet_basemap',
             entity = 'tum-tanmlh',
-            name = 'seg-based-det_8x_multi-source_convnext-v2-b_50e_planet_basemap_global',
+            name = 'ds_seg-based-det_8x_multi-source_convnext-v2-b_50e_planet_basemap_global',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
-# vis_backends = [dict(type='LocalVisBackend')]
+vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
@@ -227,7 +228,7 @@ train_dataloader = dict(
 )
 
 val_dataloader = dict(
-    batch_size=1,
+    batch_size=2,
     num_workers=1,
     persistent_workers=True,
     dataset=dict(
@@ -239,7 +240,7 @@ val_dataloader = dict(
     )
 )
 test_dataloader = dict(
-    batch_size=1,
+    batch_size=2,
     num_workers=1,
     dataset=dict(
         # ann_file = 'coco_ann_full/filtered_test_global_quartely_2023q2.json',
@@ -251,4 +252,28 @@ test_dataloader = dict(
         ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
         min_bbox_w=2
     )
+)
+
+runner_type = 'FlexibleRunner'
+strategy = dict(
+    type='DeepSpeedStrategy',
+    fp16=dict(
+        enabled=False,
+        fp16_master_weights_and_grads=False,
+        loss_scale=0,
+        loss_scale_window=500,
+        hysteresis=2,
+        min_loss_scale=1,
+        initial_scale_power=15,
+    ),
+    inputs_to_half=[0],
+    zero_optimization=dict(
+        stage=0,
+        allgather_partitions=True,
+        reduce_scatter=True,
+        allgather_bucket_size=50000000,
+        reduce_bucket_size=50000000,
+        overlap_comm=True,
+        contiguous_gradients=True,
+        cpu_offload=False),
 )

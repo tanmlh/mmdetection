@@ -40,7 +40,8 @@ from scipy.sparse import lil_matrix, csr_matrix
 from skimage.measure import label as ski_label
 from skimage.measure import regionprops
 from mmdet.structures.bbox import bbox_overlaps, obb2xyxy
-
+from numba import njit
+from numba.typed import List
 
 def compute_overlap_matrix(boxes1, boxes2, mode='numpy'):
 
@@ -1664,8 +1665,9 @@ def compute_contour_measure(pred_polygon, gt_polygon, sampling_spacing, max_stre
             plt.show()
 
     if len(contour_measures):
+        eps = 1e-8
         min_scalar_product = min(contour_measures)
-        measure = np.arccos(min_scalar_product)
+        measure = np.arccos(min_scalar_product.clip(-1+eps, 1-eps))
         measure = measure * 180 / np.pi
  
         return measure
@@ -3717,6 +3719,72 @@ def assemble_segments(segments, seg_idxes, seg_sizes, length=50, stride=30, max_
 
     return rings, poly2ring_idxes, others
 
+
+@njit
+def all_row_positive(arr):
+    """逐行判断二维数组是否全为非负数"""
+    res = np.ones(arr.shape[0], dtype=np.bool_)
+    for i in range(arr.shape[0]):
+        for j in range(arr.shape[1]):
+            if arr[i, j] < 0:
+                res[i] = False
+                break
+    return res
+
+@njit
+def assemble_segments_cpp(segments, seg_idxes, seg_sizes, length=50, stride=30, max_len=512):
+    rings = List()
+    poly2ring_idxes = List()
+    ring_cnt = 0
+
+    for i in range(len(seg_idxes)):
+        cur_poly2ring_idxes = List()
+        for j in range(len(seg_idxes[i])):
+            cur_segs_len = seg_sizes[i][j]
+            cur_ring = np.zeros((cur_segs_len, 2), dtype=np.float32)
+            cur_ring_cnts = np.zeros(cur_segs_len, dtype=np.float32)
+
+            for k in range(len(seg_idxes[i][j])):
+                idx = seg_idxes[i][j][k]
+                cur_segments = segments[idx]
+                cur_seg_mask = all_row_positive(cur_segments)
+
+                cur_segs_loc = (np.arange(length) + stride * k) % cur_segs_len
+                for mi in range(len(cur_seg_mask)):
+                    if cur_seg_mask[mi]:
+                        loc = cur_segs_loc[mi]
+                        cur_ring[loc] += cur_segments[mi]
+                        cur_ring_cnts[loc] += 1
+
+            # 处理有效区域
+            valid_idx = []
+            for v in range(len(cur_ring_cnts)):
+                if cur_ring_cnts[v] > 0:
+                    valid_idx.append(v)
+
+            out_ring = np.zeros((len(valid_idx), 2), dtype=np.float32)
+            for vi, v in enumerate(valid_idx):
+                out_ring[vi] = cur_ring[v] / cur_ring_cnts[v]
+
+            # 采样限制长度
+            if len(out_ring) > max_len:
+                sample_idxes = np.linspace(0, len(out_ring) - 1, max_len)
+                sample_idxes = np.round(sample_idxes).astype(np.int64)
+                sampled_ring = np.zeros((max_len, 2), dtype=np.float32)
+                for si in range(max_len):
+                    sampled_ring[si] = out_ring[sample_idxes[si]]
+                out_ring = sampled_ring
+
+            rings.append(out_ring)
+            cur_poly2ring_idxes.append(ring_cnt)
+            ring_cnt += 1
+
+        poly2ring_idxes.append(cur_poly2ring_idxes)
+
+    return rings, poly2ring_idxes
+
+
+
 def assemble_rings(rings, ring_idxes, format='coco'):
     polygons = []
     for i in range(len(ring_idxes)):
@@ -3845,16 +3913,16 @@ def batchify(sizes, max_diff_ratio=1.5):
     return batch_idx_list, batch_size_list
 
 
-def save_polygons(polygons, transform, crs, out_path, upscale=1):
+def save_polygons(poly_jsons, transform, crs, out_path, upscale=1):
 
-    if len(polygons) == 0:
-        return None
+    # if len(poly_jsons) == 0:
+    #     return None
     """Place holder to format result to dataset specific output."""
 
     offset = np.array([0,0]).reshape(1,2)
     global_polygons = []
 
-    for polygon in polygons:
+    for polygon in poly_jsons:
         new_rings = []
         for ring in polygon['coordinates']:
             ring = np.array(ring)

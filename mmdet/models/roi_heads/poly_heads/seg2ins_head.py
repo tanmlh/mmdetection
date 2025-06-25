@@ -220,6 +220,9 @@ class Seg2InsHead(BaseModule):
         bounds = pred_polys.get_bounds()
         rois = torch.tensor([(0, *bound) for bound in bounds]).to(mask_feats.device)
 
+        pdb.set_trace()
+
+
         if len(rois) > 0:
             roi_feats = self.poly_roi_extractor([mask_feats], rois)
 

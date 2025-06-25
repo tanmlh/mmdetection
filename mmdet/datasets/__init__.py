@@ -38,6 +38,7 @@ from .crowd_ai import CrowdAIDataset
 from .whu_mix_vector import WHUMixVectorDataset
 from .inria_vector import InriaVectorDataset
 from .planet_basemap import PlanetBasemapDataset
+from .planet_basemap_no_ann import PlanetBasemapNoAnnDataset
 from .planet_basemap_single_ann import PlanetBasemapSingleAnnDataset
 
 __all__ = [
@@ -55,5 +56,6 @@ __all__ = [
     'ADE20KInstanceDataset', 'iSAIDDataset', 'V3DetDataset', 'ConcatDataset',
     'ODVGDataset', 'MDETRStyleRefCocoDataset', 'DODDataset',
     'CustomSampleSizeSampler', 'Flickr30kDataset', 'CrowdAIDataset', 'WHUMixVectorDataset',
-    'InriaVectorDataset', 'PlanetBasemapDataset', 'PlanetBasemapSingleAnnDataset'
+    'InriaVectorDataset', 'PlanetBasemapDataset', 'PlanetBasemapSingleAnnDataset',
+    'PlanetBasemapNoAnnDataset'
 ]
