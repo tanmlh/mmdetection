@@ -242,6 +242,9 @@ class GCPPolyHead(nn.Module):
 
             losses['loss_poly_right_ang'] = loss_right_ang
 
+        if self.poly_cfg.get('apply_right_angle_loss_v2', False):
+            pdb.set_trace()
+
         if self.poly_cfg.get('apply_angle_loss', False):
             loss_ang = prim_reg_pred[:0].sum()
             diffs = []
