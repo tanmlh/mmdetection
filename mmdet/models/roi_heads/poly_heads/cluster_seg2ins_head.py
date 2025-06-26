@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 import numba
-from numba import njit, types
+from numba import njit
 from numba.typed import Dict, List
 
 from mmcv.cnn import ConvModule, build_conv_layer, build_upsample_layer
@@ -40,14 +40,12 @@ import numpy as np
 # Numba-accelerated union-find functions.
 # ------------------------------------------------------------------
 
-@njit
 def find_numba(parent, x):
     while parent[x] != x:
         parent[x] = parent[parent[x]]
         x = parent[x]
     return x
 
-@njit
 def union_numba(parent, size, center, max_prob, x, y):
     rx = find_numba(parent, x)
     ry = find_numba(parent, y)
@@ -72,7 +70,8 @@ def union_numba(parent, size, center, max_prob, x, y):
             max_prob[ry] = max_prob[rx]
         return ry
 
-@njit
+# @njit(parallel=True)
+# @njit
 def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
     N = idxes.shape[0]
     parent = np.empty(N, dtype=np.int64)
@@ -256,21 +255,15 @@ class ClusterSeg2InsHead(BaseModule):
         if len(fg_idxes) ==  0:
             return [], torch.zeros(0)
 
-
         # cluster_idxes_list = self.cluster_by_probs(fg_idxes.cpu().numpy(), fg_probs.cpu().numpy(),
         #                                            diff_thr, conn_thr, cluster_mode)
         fg_idxes = fg_idxes.cpu().numpy()
         cluster_idxes, valid = self.cluster_by_probs(fg_idxes, fg_probs.cpu().numpy(),
-                                                   diff_thr, conn_thr, cluster_mode)
+                                                     diff_thr, conn_thr, cluster_mode)
         if cluster_mode == 'early_stop':
             ins_mask[fg_idxes[valid,0], fg_idxes[valid,1]] = cluster_idxes[valid] + 1
         else:
             ins_mask[fg_idxes[:,0], fg_idxes[:,1]] = cluster_idxes + 1
-
-        # cluster_cnt = 0
-        # for cluster_idxes in cluster_idxes_list:
-        #     cluster_cnt += 1
-        #     ins_mask[cluster_idxes[:,0], cluster_idxes[:,1]] = cluster_cnt
 
         t1 = time.time()
 
@@ -310,7 +303,6 @@ class ClusterSeg2InsHead(BaseModule):
         Returns a list of clusters, where each cluster is a numpy array of pixel coordinates.
         """
 
-        from numba import njit, types
         from numba.typed import Dict, List
         import numpy as np
 
@@ -370,6 +362,7 @@ class ClusterSeg2InsHead(BaseModule):
 
         import time
         t0 = time.time()
+        print(f'start the clustering process')
 
         N = idxes.shape[0]
         max_row = int(np.max(idxes[:, 0])) + 1
@@ -401,6 +394,7 @@ class ClusterSeg2InsHead(BaseModule):
 
         t4 = time.time()
         # print(f'cluster by probs time: {t1-t0} {t2-t1} {t3-t2} {t4-t3}')
+        print(f'finish the clustering process')
         return cluster_idxes, valid
 
         clusters_dict = {}

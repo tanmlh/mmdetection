@@ -59,8 +59,11 @@ class InferencePipeline:
             os.makedirs(self.save_cfg['out_dir'], exist_ok=True)
         
         # Create thread pool for CPU tasks
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.cpu_workers) as executor:
-            self.executor = executor
+
+        # with concurrent.futures.ThreadPoolExecutor(max_workers=self.cpu_workers) as executor:
+        #     self.executor = executor
+        with concurrent.futures.ProcessPoolExecutor(max_workers=self.cpu_workers) as executor:
+            self.executer = executor
             
             # Start total time tracking
             total_start = time.perf_counter()
@@ -143,24 +146,31 @@ class InferencePipeline:
     def _process_cpu_stage1(self, imgs, results, img_path, transform, crs):
         """CPU stage1: mosaic_sem_seg, seg2ins, and sample_segments processing"""
         try:
+            print(f'start predict_mosaic_sem_seg!')
             imgs_cpu = imgs.cpu()
             # mosaic_sem_seg processing
             mosaic_start = time.perf_counter()
             with torch.no_grad():
                 results = self.model.predict_mosaic_sem_seg(imgs_cpu, results)
             self.time_stats['predict_mosaic_sem_seg'] += time.perf_counter() - mosaic_start
-            
+            print(f'finish predict_mosaic_sem_seg!')
+
+
+            print(f'start predict_seg2ins!')
             # seg2ins processing
             seg2ins_start = time.perf_counter()
             with torch.no_grad():
                 results = self.model.seg_poly_head.predict_seg2ins(imgs_cpu, results)
             self.time_stats['predict_seg2ins'] += time.perf_counter() - seg2ins_start
+            print(f'finish predict_seg2ins!')
             
+            print(f'start predict_sample_segments!')
             # sample_segments processing
             sample_start = time.perf_counter()
             with torch.no_grad():
                 results = self.model.seg_poly_head.poly_head.predict_sample_segments(imgs_cpu, results)
             self.time_stats['predict_sample_segments'] += time.perf_counter() - sample_start
+            print(f'finish predict_sample_segments!')
             
             # Add to GPU task queue
             self.gpu_task_queue.put({
@@ -171,6 +181,7 @@ class InferencePipeline:
                 'transform': transform,
                 'crs': crs
             })
+
         except Exception as e:
             print(f"CPU stage1 task error: {e}")
             self.active_tasks -= 1  # Reduce active task count

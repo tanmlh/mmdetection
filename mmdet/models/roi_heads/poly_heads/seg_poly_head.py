@@ -208,7 +208,7 @@ class SegPolyHead(BaseModule):
 
         return losses
 
-    def predict_seg2ins(self, imgs,  batch_data_samples):
+    def predict_seg2ins(self, imgs, batch_data_samples):
 
         seg_logits = batch_data_samples[0].seg_logits
         B, C, H, W = seg_logits.shape

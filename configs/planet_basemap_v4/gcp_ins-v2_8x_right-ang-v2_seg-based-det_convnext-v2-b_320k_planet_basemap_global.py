@@ -57,7 +57,7 @@ model = dict(
             poly_iou_thr=0.3,
             max_offsets=20,
             train_poly_head=True,
-            sem_seg_thr=0.5,
+            sem_seg_thr=0.4,
             num_max_sample=200,
             train_seg2ins_head=False,
             use_roi_mask_feat=False
@@ -65,9 +65,9 @@ model = dict(
         seg2ins_head=dict(
             type='ClusterSeg2InsHead',
             poly_cfg=dict(
-                sem_seg_thr=0.5,
+                sem_seg_thr=0.4,
                 diff_thr=0.05,
-                cluster_mode='late_stop'
+                cluster_mode='early_stop'
             )
         ),
         poly_head=dict(
@@ -93,8 +93,7 @@ model = dict(
                 num_min_bins=32,
                 loss_weight_dp=0.01,
                 max_step_size=128,
-                apply_right_angle_loss=False,
-                apply_right_angle_loss_v2=True,
+                apply_right_angle_loss=True,
                 apply_angle_loss=False
             ),
             decoder=dict(  # Mask2FormerTransformerDecoder
@@ -127,7 +126,7 @@ model = dict(
             loss_poly_right_ang = dict(
                 type='SmoothL1Loss',
                 reduction='mean',
-                loss_weight=20.
+                loss_weight=10.
             )
         )
     ),
@@ -148,7 +147,7 @@ model = dict(
             out_size=None, out_size_scale=1.,
             filter_border_width = 0,
             sem_seg_type='sem_seg',
-            sem_seg_thr=0.5,
+            sem_seg_thr=0.4,
             eval_proposal=False
         ),
         post_cfg = dict(

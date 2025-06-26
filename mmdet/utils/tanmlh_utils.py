@@ -728,7 +728,7 @@ def paste_masks(masks, boxes, H, W):
     return new_masks
 
 
-def generate_angles(N):
+def generate_angles_4(N):
 
     # Generate initial angles in radians, from 0 to 2*pi (exclusive)
     # initial_angles = torch.linspace(0, 2 * torch.pi, steps=N, endpoint=False)
@@ -745,14 +745,34 @@ def generate_angles(N):
 
     return angles_radians
 
-def get_angles(points):
-    # points: (N, 2)
+def generate_angles(N):
+    q1 = torch.linspace(0, torch.pi/2, N+1)[:-1].unsqueeze(1)  # (N,1)
+    q2 = q1 + torch.pi / 2
+
+    return torch.cat([q1, q2], dim=1)  # shape (N,2)
+
+
+def get_angles(points, eps=1e-8):
     u = points
     v = torch.roll(u, shifts=[-1], dims=[0])
     vec = v - u
-    angle = torch.atan2(vec[:,1], vec[:,0])
+    
+    safe_vec = vec + eps * torch.randn_like(vec)
+    
+    return torch.atan2(safe_vec[:,1], safe_vec[:,0])
 
-    return angle
+"""
+def get_angles(points, eps=1e-8):
+    u = points
+    v = torch.roll(u, shifts=[-1], dims=[0])
+    vec = v - u
+    
+    x = vec[:,0]
+    y = vec[:,1]
+    sign = torch.where(x >= 0, eps, -eps)
+    denom = x + sign + torch.sqrt(x**2 + y**2 + eps*eps)
+    return 2 * torch.atan(y / denom)
+"""
 
 def batch_get_angles(points):
     # points: (B, N, 2)

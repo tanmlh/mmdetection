@@ -113,7 +113,7 @@ def inference(args, logger):
         model=model,
         num_images=len(data_loader),
         save_cfg=save_cfg,
-        cpu_workers=2
+        cpu_workers=8
     )
     results = pipeline.run(data_loader)
 
