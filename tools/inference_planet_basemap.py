@@ -132,6 +132,7 @@ def inference(args, logger):
             results = model.seg_poly_head.predict_seg2ins(imgs, results) # CPU
             results = model.seg_poly_head.poly_head.predict_sample_segments(imgs, results) # CPU
             results = model.seg_poly_head.poly_head.predict_gcp(imgs, results) # GPU
+
             results = model.seg_poly_head.poly_head.predict_assemble_segments(imgs, results) # CPU
             results = model.seg_poly_head.poly_head.predict_dp(imgs, results) # GPU
 
@@ -147,7 +148,6 @@ def inference(args, logger):
             transform = results[0].metainfo['tif_meta']['transform']
             crs = results[0].metainfo['tif_meta']['crs']
             polygon_utils.save_polygons(poly_jsons, transform, crs, out_path, out_scale)
-
     """
 
     del data_loader

@@ -536,7 +536,7 @@ class GCPPolyHead(nn.Module):
 
         if len(sampled_segs) > 0:
 
-            up_imgs = F.interpolate(imgs, (H, W)).cpu()
+            up_imgs = F.interpolate(imgs.cpu(), (H, W))
             mask_feats = torch.cat([seg_probs, up_imgs], dim=1)
 
             poly_pred = torch.from_numpy(sampled_segs).to(imgs.device).float()

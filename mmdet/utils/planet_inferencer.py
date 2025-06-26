@@ -187,7 +187,7 @@ class InferencePipeline:
                 gcp_start = time.perf_counter()
                 with torch.no_grad():
                     gcp_results = self.model.seg_poly_head.poly_head.predict_gcp(
-                        task['imgs'], 
+                        task['imgs'],
                         task['results']
                     )
                 self.time_stats['predict_gcp'] += time.perf_counter() - gcp_start
