@@ -1,4 +1,5 @@
-pip install geopandas
-pip install scikit-learn
-pip install numba
-pip install fiona
+geopandas
+scikit-learn
+numba
+fiona
+mmpretrain

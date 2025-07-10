@@ -209,12 +209,8 @@ class SegBasedDetector(BaseDetector):
 
             cur_img = torch.cat(selected_crop_imgs[splits[j]:splits[j+1]])
             cur_img = F.interpolate(cur_img, size=(h_crop_up, w_crop_up), mode='bilinear')
-            t1 = time.time()
 
             ori_x = self.backbone(cur_img)
-            torch.cuda.synchronize()
-
-            t2 = time.time()
 
             pseudo_data_samples = [DetDataSample(
                 metainfo=dict(
@@ -237,16 +233,8 @@ class SegBasedDetector(BaseDetector):
 
             pseudo_meta_infos = [data_sample.metainfo for data_sample in pseudo_data_samples]
             pred_sem_seg = self.seg_head.predict(seg_feats, pseudo_meta_infos, None)
-            torch.cuda.synchronize()
 
-            t3 = time.time()
-
-            # t0 = time.time()
-            # pred_sem_seg = pred_sem_seg.cpu()
             pred_sem_seg = pred_sem_seg.to('cpu', non_blocking=True)
-            torch.cuda.synchronize()
-            # t1 = time.time()
-            # print(f'GPU to CPU time: {t1-t0}')
 
             sem_seg_list = [
                 InstanceData(
@@ -255,8 +243,6 @@ class SegBasedDetector(BaseDetector):
             ]
 
             merged_sem_seg_list.extend(sem_seg_list)
-            t4 = time.time()
-            # print(f' {t1-t0} {t2-t1} {t3-t2} {t4-t3}')
 
         # need to synchronize since merged_sem_seg_list may contain tensors which are still on GPU
         torch.cuda.synchronize()
@@ -274,7 +260,6 @@ class SegBasedDetector(BaseDetector):
         seg_logits = merged_sem_seg.sem_seg
         batch_data_samples[0].seg_logits = seg_logits
         """
-
 
         return batch_data_samples
 

@@ -3913,7 +3913,7 @@ def batchify(sizes, max_diff_ratio=1.5):
     return batch_idx_list, batch_size_list
 
 
-def save_polygons(poly_jsons, transform, crs, out_path, upscale=1):
+def save_polygons(poly_jsons, transform, crs, out_path, upscale=1, properties=None):
 
     # if len(poly_jsons) == 0:
     #     return None
@@ -3922,7 +3922,8 @@ def save_polygons(poly_jsons, transform, crs, out_path, upscale=1):
     offset = np.array([0,0]).reshape(1,2)
     global_polygons = []
 
-    for polygon in poly_jsons:
+    idxes = []
+    for i, polygon in enumerate(poly_jsons):
         new_rings = []
         for ring in polygon['coordinates']:
             ring = np.array(ring)
@@ -3933,8 +3934,10 @@ def save_polygons(poly_jsons, transform, crs, out_path, upscale=1):
         if len(new_rings) > 0:
             new_polygon = shapely.geometry.Polygon(new_rings[0], new_rings[1:] if len(new_rings) > 1 else None)
             global_polygons.append(new_polygon)
+            idxes.append(i)
 
-    gdf = gpd.GeoDataFrame(geometry=global_polygons)
+    properties = {key: [value[x] for x in idxes] for key, value in properties.items()}
+    gdf = gpd.GeoDataFrame(properties, geometry=global_polygons)
     gdf.crs = crs
     gdf.to_file(out_path)
 

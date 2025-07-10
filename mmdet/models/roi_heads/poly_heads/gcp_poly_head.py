@@ -552,9 +552,6 @@ class GCPPolyHead(nn.Module):
         )
         sampled_segs = sampled_segs.astype(np.float32)
 
-        seg_probs = batch_data_samples[0].seg_probs
-        B, _, H, W = seg_probs.shape
-
         poly_feat_list = []
         poly_pred_list = []
         if len(sampled_segs) > 0:
@@ -620,7 +617,7 @@ class GCPPolyHead(nn.Module):
 
         return batch_data_samples
 
-    def predict_dp(self, imgs, batch_data_samples):
+    def predict_dp(self, imgs, batch_data_samples, save_instances=True):
 
         rings = batch_data_samples[0].get('rings', None)
         scores = batch_data_samples[0].scores
@@ -647,12 +644,13 @@ class GCPPolyHead(nn.Module):
         else:
             simp_polygons = []
 
-        seg_instances = InstanceData(segmentations=simp_polygons, scores=scores)
-        seg_instances.polygon_masks = PolygonMasks.from_json(simp_polygons, H, W)
-        seg_instances.bboxes = torch.tensor(seg_instances.polygon_masks.get_bounds())
-        seg_instances.labels = torch.zeros(len(seg_instances), dtype=torch.long)
+        if save_instances:
+            seg_instances = InstanceData(segmentations=simp_polygons, scores=scores)
+            seg_instances.polygon_masks = PolygonMasks.from_json(simp_polygons, H, W)
+            seg_instances.bboxes = torch.tensor(seg_instances.polygon_masks.get_bounds())
+            seg_instances.labels = torch.zeros(len(seg_instances), dtype=torch.long)
 
-        batch_data_samples[0].pred_instances = seg_instances
+            batch_data_samples[0].pred_instances = seg_instances
 
         return batch_data_samples
 
