@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw, ImageFilter
 import skimage.draw
 import geopandas as gpd
 import skimage
+import json
 import matplotlib.pyplot as plt
 # from descartes import PolygonPatch
 from matplotlib.collections import PatchCollection
@@ -40,8 +41,14 @@ from scipy.sparse import lil_matrix, csr_matrix
 from skimage.measure import label as ski_label
 from skimage.measure import regionprops
 from mmdet.structures.bbox import bbox_overlaps, obb2xyxy
+from mmdet.structures.mask import PolygonMasks
 from numba import njit
 from numba.typed import List
+
+from collections import defaultdict
+from pycocotools import mask as maskUtils
+from pycocotools.coco import COCO
+from pycocotools import mask as cocomask
 
 def compute_overlap_matrix(boxes1, boxes2, mode='numpy'):
 
@@ -2483,12 +2490,6 @@ def transform_polygon(polygon, affine_matrix):
     
     return transformed_polygon
 
-
-from pycocotools.coco import COCO
-from pycocotools import mask as cocomask
-import numpy as np
-import json
-from tqdm import tqdm
 
 def calc_IoU(a, b):
     i = np.logical_and(a, b)
@@ -5041,3 +5042,77 @@ def sample_neighborhood_points(poly_tensor, window_size=3, stride=1):
     sampled_points = poly_tensor_expanded + offsets  # Resulting shape: (B, K, N, window_size*window_size, 2)
     
     return sampled_points
+
+
+
+def bounding_box(points):
+    """returns a list containing the bottom left and the top right 
+    points in the sequence
+    Here, we traverse the collection of points only once, 
+    to find the min and max for x and y
+    """
+    bot_left_x, bot_left_y = float('inf'), float('inf')
+    top_right_x, top_right_y = float('-inf'), float('-inf')
+    for x, y in points:
+        bot_left_x = min(bot_left_x, x)
+        bot_left_y = min(bot_left_y, y)
+        top_right_x = max(top_right_x, x)
+        top_right_y = max(top_right_y, y)
+
+    return [bot_left_x, bot_left_y, top_right_x - bot_left_x, top_right_y - bot_left_y]
+
+def polis(coords, bndry):
+    """Computes one side of the "polis" metric.
+    Input:
+        coords: A Shapley coordinate sequence (presumably the vertices
+                of a polygon).
+        bndry: A Shapely linestring (presumably the boundary of
+        another polygon).
+    
+    Returns:
+        The "polis" metric for this pair.  You usually compute this in
+        both directions to preserve symmetry.
+    """
+    sum = 0.0
+    for pt in (shapely.geometry.Point(c) for c in coords[:-1]): # Skip the last point (same as first)
+        sum += bndry.distance(pt)
+    return sum/float(2*len(coords))
+
+def compare_polys(poly_a, poly_b):
+    """Compares two polygons via the "polis" distance metric.
+    See "A Metric for Polygon Comparison and Building Extraction
+    Evaluation" by J. Avbelj, et al.
+    Input:
+        poly_a: A Shapely polygon.
+        poly_b: Another Shapely polygon.
+    Returns:
+        The "polis" distance between these two polygons.
+    """
+    bndry_a, bndry_b = poly_a.exterior, poly_b.exterior
+    dist = polis(bndry_a.coords, bndry_b)
+    dist += polis(bndry_b.coords, bndry_a)
+    return dist
+
+def compute_polys_measure(pred_polygons, gt_polygons, iou_thr=0.5):
+    gt_bounds = np.array([polygon.bounds for polygon in gt_polygons])
+
+    filtered_polygons = []
+    for pred_polygon in pred_polygons:
+        valid_inds = get_within_bounds_ids(pred_polygon.bounds, gt_bounds)
+        valid_gt_polygons = [gt_polygons[x] for x in valid_inds.nonzero()[0]]
+        for gt_polygon in valid_gt_polygons:
+            if iou_thr < pred_polygon.intersection(gt_polygon).area / (pred_polygon.area + 1e-8):
+                filtered_polygons.append([pred_polygon, gt_polygon])
+                break
+
+    poly_s_list = []
+    for pred_poly, gt_poly in filtered_polygons:
+        if not pred_poly.is_valid:
+            pred_poly = pred_poly.buffer(0.0)
+        if not gt_poly.is_valid:
+            gt_poly = gt_poly.buffer(0.0)
+
+        poly_s = compare_polys(pred_poly, gt_poly)
+        poly_s_list.append(poly_s)
+
+    return poly_s_list
