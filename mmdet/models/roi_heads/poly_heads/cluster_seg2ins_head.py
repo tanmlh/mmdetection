@@ -11,7 +11,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 import numba
-from numba import njit, types
+import numba.cuda
+from numba import njit
 from numba.typed import Dict, List
 
 from mmcv.cnn import ConvModule, build_conv_layer, build_upsample_layer
@@ -72,7 +73,8 @@ def union_numba(parent, size, center, max_prob, x, y):
             max_prob[ry] = max_prob[rx]
         return ry
 
-@njit
+# @njit
+@njit(parallel=True)
 def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
     N = idxes.shape[0]
     parent = np.empty(N, dtype=np.int64)
@@ -99,6 +101,12 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
         cur_prob = probs[pid]
         rep_list = np.empty(4, dtype=np.int64)
         rep_count = 0
+
+        # if k % 1000000 == 0:
+        #     # time.sleep(0.001) # release GIL lock for not blocking the main thread
+        #     temp = 0
+        #     for __ in range(1000000):
+        #         temp += 1
 
         # Check 4-connected neighbors
         for j in range(4):
@@ -192,7 +200,6 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
     return parent, valid
 
 
-
 @MODELS.register_module()
 class ClusterSeg2InsHead(BaseModule):
 
@@ -256,21 +263,15 @@ class ClusterSeg2InsHead(BaseModule):
         if len(fg_idxes) ==  0:
             return [], torch.zeros(0)
 
-
         # cluster_idxes_list = self.cluster_by_probs(fg_idxes.cpu().numpy(), fg_probs.cpu().numpy(),
         #                                            diff_thr, conn_thr, cluster_mode)
         fg_idxes = fg_idxes.cpu().numpy()
         cluster_idxes, valid = self.cluster_by_probs(fg_idxes, fg_probs.cpu().numpy(),
-                                                   diff_thr, conn_thr, cluster_mode)
+                                                     diff_thr, conn_thr, cluster_mode)
         if cluster_mode == 'early_stop':
             ins_mask[fg_idxes[valid,0], fg_idxes[valid,1]] = cluster_idxes[valid] + 1
         else:
             ins_mask[fg_idxes[:,0], fg_idxes[:,1]] = cluster_idxes + 1
-
-        # cluster_cnt = 0
-        # for cluster_idxes in cluster_idxes_list:
-        #     cluster_cnt += 1
-        #     ins_mask[cluster_idxes[:,0], cluster_idxes[:,1]] = cluster_cnt
 
         t1 = time.time()
 
@@ -310,110 +311,19 @@ class ClusterSeg2InsHead(BaseModule):
         Returns a list of clusters, where each cluster is a numpy array of pixel coordinates.
         """
 
-        from numba import njit, types
-        from numba.typed import Dict, List
-        import numpy as np
-
-        # 如果数据集很大（>100万元素），使用两遍遍历：
-        @njit
-        def group_by_parent(parent, idxes, valid, cluster_mode):
-            # 创建一个映射：组ID -> 输出列表位置
-            group_to_index = dict()
-            group_to_cnt = dict()
-            cur_group_cnt = dict()
-            cnt = 0
-            N = len(parent)
-            
-            for i in range(N):
-                rep = parent[i]
-                if cluster_mode == 1 and not valid[i]:
-                    continue
-
-                if rep not in group_to_index:
-                    group_to_index[rep] = cnt
-                    group_to_cnt[rep] = 0
-                    cur_group_cnt[rep] = 0
-                    cnt += 1
-
-                group_to_cnt[rep] += 1
-
-            results = dict()
-            # 将每个组转换为数组
-            for i in range(N):
-                rep = parent[i]
-                if cluster_mode == 1 and not valid[i]:
-                    continue
-                if not group_to_index[rep] in results:
-                    lst = np.zeros((group_to_cnt[rep], 2), dtype=np.int64)
-                    results[group_to_index[rep]] = lst
-                else:
-                    lst = results[group_to_index[rep]]
-
-                lst[cur_group_cnt[rep], 0] = idxes[i][0]
-                lst[cur_group_cnt[rep], 1] = idxes[i][1]
-
-                cur_group_cnt[rep] += 1
-
-            return results
-
-        @njit
-        def create_grid(idxes, max_row, max_col):
-            N = idxes.shape[0]  # 获取idxes的行数
-            grid = np.full((max_row, max_col), -1, dtype=np.int64)  # 初始化全-1的网格
-            
-            for i in range(N):
-                r = idxes[i, 0]  # 直接使用整数索引（无需int转换）
-                c = idxes[i, 1]
-                grid[r, c] = i   # 在对应位置记录索引i
-            
-            return grid
-
-        import time
-        t0 = time.time()
-
         N = idxes.shape[0]
         max_row = int(np.max(idxes[:, 0])) + 1
         max_col = int(np.max(idxes[:, 1])) + 1
 
 
-        # grid = create_grid(idxes, max_row, max_col)
         grid = np.full((max_row, max_col), -1, dtype=np.int64)
         grid[idxes[:, 0], idxes[:, 1]] = np.arange(len(idxes))
 
-        # for i in range(N):
-        #     r = int(idxes[i, 0])
-        #     c = int(idxes[i, 1])
-        #     grid[r][c] = i
-
-        t1 = time.time()
-
         sorted_ids = np.argsort(-probs)
 
-        t2 = time.time()
         parent, valid = cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr)
-        t3 = time.time()
 
         unique_vals, inverse = np.unique(parent, return_inverse=True)
         cluster_idxes = inverse.astype(np.int64)
 
-        # clusters_dict = group_by_parent(parent, idxes, valid, cluster_mode == 'early_stop')
-        # clusters_list = list(clusters_dict.values())
-
-        t4 = time.time()
-        # print(f'cluster by probs time: {t1-t0} {t2-t1} {t3-t2} {t4-t3}')
         return cluster_idxes, valid
-
-        clusters_dict = {}
-        for i in range(N):
-            rep = parent[i]
-            if not valid[i] and cluster_mode == 'early_stop':
-                continue
-            if rep in clusters_dict:
-                clusters_dict[rep].append(idxes[i])
-            else:
-                clusters_dict[rep] = [idxes[i]]
-
-        clusters_list = [np.array(clusters_dict[k]) for k in clusters_dict]
-
-        return clusters_list
-

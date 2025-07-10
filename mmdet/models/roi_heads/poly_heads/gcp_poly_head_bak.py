@@ -118,9 +118,9 @@ class GCPPolyHead(nn.Module):
         sampled_segments = sampled_segments.to(device)
 
         prim_reg_pred = sampled_segments
-
-        poly_feat = self.get_init_poly_feat(prim_reg_pred, W, **kwargs)
-        prim_reg_pred = self.forward(prim_reg_pred, poly_feat, W)
+        for i in range(num_iter):
+            poly_pred_results = self.forward(prim_reg_pred, W, **kwargs)
+            prim_reg_pred = poly_pred_results['prim_reg_pred']
 
         t4 = time.time()
 
@@ -371,10 +371,35 @@ class GCPPolyHead(nn.Module):
 
         return normalized
 
-    def get_init_poly_feat(self, poly_pred, W, mask_feat=None, batch_idxes=None, **kwargs):
+    def forward(self, poly_pred, W, mask_feat=None, query_feat=None, batch_idxes=None):
+
+        results = dict()
+
         K, N, _ = poly_pred.shape
         C = self.feat_channels
 
+        """
+        centerized_poly_pred = []
+        for cur_poly_pred in poly_pred:
+            cur_poly_mask = (cur_poly_pred >= 0).all(dim=-1)
+            # if cur_poly_mask.sum() == 0:
+            #     pdb.set_trace()
+
+            maxv = cur_poly_pred[cur_poly_pred[:,0] >= 0].max(dim=0)[0]
+            minv = cur_poly_pred[cur_poly_pred[:,0] >= 0].min(dim=0)[0]
+            max_w = (maxv - minv).max()
+            cent_pred = (cur_poly_pred -  minv[None]) / max_w
+            cent_pred = (cent_pred - 0.5) * 2
+            cent_pred[~cur_poly_mask] = -2
+            centerized_poly_pred.append(cent_pred)
+
+        centerized_poly_pred = torch.stack(centerized_poly_pred)
+        """
+        t0 = time.time()
+        centerized_poly_pred = self.vectorized_normalization(poly_pred)
+        poly_feat = self.poly_embed(centerized_poly_pred).view(K, N, C)
+
+        t1 = time.time()
         if mask_feat is not None:
             norm_poly_pred = (poly_pred / W - 0.5) * 2
             point_feat_list = []
@@ -407,25 +432,18 @@ class GCPPolyHead(nn.Module):
                 point_feat_list.append(point_feat)
                 t3 = time.time()
 
-            poly_feat = torch.cat(point_feat_list, dim=0)
+            point_feat = torch.cat(point_feat_list, dim=0)
+            point_feat = self.poly_feat_embed(point_feat)
 
-        return poly_feat
+            poly_feat += point_feat
 
-
-    def forward(self, poly_pred, poly_feat, W):
-
-        results = dict()
-        K, N, _ = poly_feat.shape
-        C = self.feat_channels
-
-        centerized_poly_pred = self.vectorized_normalization(poly_pred)
-
-        poly_feat = self.poly_feat_embed(poly_feat)
-        poly_feat += self.poly_embed(centerized_poly_pred).view(K, N, C)
+            if self.poly_cfg.get('use_decoded_feat_in_poly_feat', False):
+                poly_feat += query_feat.detach().view(K, 1, C)
 
         poly_pos_embed = self.positional_encoding(poly_feat.new_zeros(K, N, 1))
         poly_pos_embed = poly_pos_embed.view(K, C, N).permute(0,2,1)
         # poly_pos_embed += ((torch.arange(N, device=poly_pred.device) / N - 0.5) * 2).view(1,-1,1)
+        t4 = time.time()
 
         query_feat = poly_feat
         query_embed = poly_pos_embed
@@ -453,7 +471,12 @@ class GCPPolyHead(nn.Module):
         prim_pred_reg = torch.clamp(prim_pred_reg, 0, W)
         prim_pred_reg[(poly_pred < 0).all(dim=-1)] = -1
 
-        return prim_pred_reg
+        results['prim_reg_pred'] = prim_pred_reg
+
+        t5 = time.time()
+
+        print(f'GCP forward time: {t1-t0} {t2-t1} {t3-t2} {t4-t3} {t5-t4}')
+        return results
 
     def _get_poly_targets_single(self, poly_pred, poly_gt_json, sampled_segments,
                                  assign_type='assigner'):
@@ -533,10 +556,6 @@ class GCPPolyHead(nn.Module):
         pred_polys = batch_data_samples[0].pred_polys
         scores = batch_data_samples[0].scores
         B, _, H, W = seg_probs.shape
-        num_max_rings = self.poly_cfg.get('num_max_rings', 5000)
-        batch_idxes = batch_data_samples[0].get(
-            'batch_idxes', torch.zeros(len(pred_polys), dtype=torch.long)
-        )
 
         N = self.poly_cfg.get('num_inter_points', 96)
         t0 = time.time()
@@ -552,57 +571,63 @@ class GCPPolyHead(nn.Module):
         )
         sampled_segs = sampled_segs.astype(np.float32)
 
-        poly_feat_list = []
-        poly_pred_list = []
-        if len(sampled_segs) > 0:
-
-            poly_pred = torch.from_numpy(sampled_segs).float()
-            poly_pred_list = poly_pred.split(num_max_rings)
-            segs2poly_idxes_list = torch.tensor(segs2poly_idxes[:,0]).split(num_max_rings)
-
-            for i, (poly_pred, segs2poly_idxes) in enumerate(zip(poly_pred_list, segs2poly_idxes_list)):
-                poly_feat = self.get_init_poly_feat(poly_pred, W, mask_feats, batch_idxes[segs2poly_idxes])
-                poly_feat_list.append(poly_feat)
-
         batch_data_samples[0].sampled_segs = sampled_segs
         batch_data_samples[0].poly2segs_idxes = poly2segs_idxes
         batch_data_samples[0].seg_sizes = seg_sizes
         batch_data_samples[0].segs2poly_idxes = segs2poly_idxes
-        batch_data_samples[0].poly_feat_list = poly_feat_list
-        batch_data_samples[0].poly_pred_list = poly_pred_list
 
         return batch_data_samples
 
     def predict_gcp(self, imgs, batch_data_samples):
 
+        t0 = time.time()
+        num_max_rings = self.poly_cfg.get('num_max_rings', 5000)
+        pred_polys = batch_data_samples[0].pred_polys
+        sampled_segs = batch_data_samples[0].sampled_segs
+        segs2poly_idxes = batch_data_samples[0].segs2poly_idxes
+        batch_idxes = batch_data_samples[0].get(
+            'batch_idxes', torch.zeros(len(pred_polys), dtype=torch.long)
+        )
         seg_probs = batch_data_samples[0].seg_probs
-        poly_pred_list = batch_data_samples[0].poly_pred_list
-        poly_feat_list = batch_data_samples[0].poly_feat_list
-
         B, _, H, W = seg_probs.shape
 
-        prim_reg_pred_list = []
-        for poly_pred, poly_feat in zip(poly_pred_list, poly_feat_list):
-            poly_pred = poly_pred.to(imgs.device)
-            poly_feat = poly_feat.to(imgs.device)
+        if len(sampled_segs) > 0:
 
-            prim_reg_pred = self.forward(poly_pred, poly_feat, W)
-            prim_reg_pred_list.append(prim_reg_pred)
+            up_imgs = F.interpolate(imgs.cpu(), (H, W))
+            mask_feats = torch.cat([seg_probs, up_imgs], dim=1)
 
-        if len(prim_reg_pred_list) > 0:
-            prim_reg_pred = torch.cat(prim_reg_pred_list, dim=0)
+            poly_pred = torch.from_numpy(sampled_segs).to(imgs.device).float()
+
+            b, c, h, w = mask_feats.shape
+
+            poly_pred_list = poly_pred.split(num_max_rings)
+            segs2poly_idxes_list = torch.tensor(segs2poly_idxes[:,0]).split(num_max_rings)
+            t2 = time.time()
+
+            prim_reg_pred_list = []
+            for i, (poly_pred, segs2poly_idxes) in enumerate(zip(poly_pred_list, segs2poly_idxes_list)):
+                dp_pred_results = self.forward(
+                    poly_pred, W, mask_feat=mask_feats,
+                    batch_idxes=batch_idxes[segs2poly_idxes] if batch_idxes is not None else None
+                )
+                prim_reg_pred = dp_pred_results['prim_reg_pred']
+                prim_reg_pred_list.append(prim_reg_pred)
+
+            prim_reg_pred = torch.cat(prim_reg_pred_list)
             batch_data_samples[0].prim_reg_pred = prim_reg_pred
+            t3 = time.time()
+            # print(f'predict GCP time: {t1-t0} {t2-t1} {t3-t2}')
 
         return batch_data_samples
 
     def predict_assemble_segments(self, imgs, batch_data_samples):
+        sampled_segs = batch_data_samples[0].sampled_segs
         poly2segs_idxes = batch_data_samples[0].poly2segs_idxes
         seg_sizes = batch_data_samples[0].seg_sizes
-        sampled_segs = batch_data_samples[0].sampled_segs
 
         if len(sampled_segs) > 0:
-
             prim_reg_pred = batch_data_samples[0].prim_reg_pred
+
             poly2segs_idxes = self.to_numba_nested_list(poly2segs_idxes)
             seg_sizes = self.to_numba_nested_list(seg_sizes)
             rings, poly2ring_idxes = polygon_utils.assemble_segments_cpp(
@@ -617,7 +642,7 @@ class GCPPolyHead(nn.Module):
 
         return batch_data_samples
 
-    def predict_dp(self, imgs, batch_data_samples, save_instances=True):
+    def predict_dp(self, imgs, batch_data_samples):
 
         rings = batch_data_samples[0].get('rings', None)
         scores = batch_data_samples[0].scores
@@ -644,13 +669,12 @@ class GCPPolyHead(nn.Module):
         else:
             simp_polygons = []
 
-        if save_instances:
-            seg_instances = InstanceData(segmentations=simp_polygons, scores=scores)
-            seg_instances.polygon_masks = PolygonMasks.from_json(simp_polygons, H, W)
-            seg_instances.bboxes = torch.tensor(seg_instances.polygon_masks.get_bounds())
-            seg_instances.labels = torch.zeros(len(seg_instances), dtype=torch.long)
+        seg_instances = InstanceData(segmentations=simp_polygons, scores=scores)
+        seg_instances.polygon_masks = PolygonMasks.from_json(simp_polygons, H, W)
+        seg_instances.bboxes = torch.tensor(seg_instances.polygon_masks.get_bounds())
+        seg_instances.labels = torch.zeros(len(seg_instances), dtype=torch.long)
 
-            batch_data_samples[0].pred_instances = seg_instances
+        batch_data_samples[0].pred_instances = seg_instances
 
         return batch_data_samples
 

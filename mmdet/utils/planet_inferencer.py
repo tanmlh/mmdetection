@@ -2,10 +2,16 @@ import queue
 import threading
 import concurrent.futures
 import torch
+import pdb
+import numpy as np
 from tqdm import tqdm
 import os
 import time
 import mmdet.utils.tanmlh_polygon_utils as polygon_utils
+import resource
+import rasterio
+from rasterio.transform import Affine
+
 
 class InferencePipeline:
     def __init__(self, model, num_images, save_cfg, cpu_workers=None):
@@ -56,11 +62,23 @@ class InferencePipeline:
         """
         # Create output directory if saving enabled
         if self.save_cfg.get('save_results', False):
-            os.makedirs(self.save_cfg['out_dir'], exist_ok=True)
+            out_dir = self.save_cfg['out_dir']
+            flag_dir = os.path.join(out_dir, 'flag')
+            out_geojson_dir = os.path.join(out_dir, 'geojson')
+            out_tif_dir = os.path.join(out_dir, 'tif')
+
+            os.makedirs(out_dir, exist_ok=True)
+            os.makedirs(flag_dir, exist_ok=True)
+            os.makedirs(out_geojson_dir, exist_ok=True)
+            os.makedirs(out_tif_dir, exist_ok=True)
+
         
         # Create thread pool for CPU tasks
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.cpu_workers) as executor:
             self.executor = executor
+        # with concurrent.futures.ProcessPoolExecutor(max_workers=self.cpu_workers) as executor:
+        #     self.executor = executor
             
             # Start total time tracking
             total_start = time.perf_counter()
@@ -71,7 +89,18 @@ class InferencePipeline:
                 for idx, data_batch in enumerate(data_loader):
                     if idx >= self.num_images:
                         break
-                    
+                    file_name = data_batch['data_samples'][0].metainfo['img_path'].split('/')[-1].split('.')[0]
+                    start_flag_path = os.path.join(flag_dir, f'{file_name}.start')
+                    finish_flag_path = os.path.join(flag_dir, f'{file_name}.finish')
+
+                    if os.path.exists(start_flag_path) or os.path.exists(finish_flag_path):
+                        print(f'{file_name} is under processing or has already been processed, skip it.')
+                        continue
+
+                    with open(start_flag_path, 'w') as _:
+                        pass
+
+
                     # Update progress description
                     pbar.set_description(f"Processing images ({self.active_tasks} active tasks)")
                     
@@ -92,6 +121,8 @@ class InferencePipeline:
                         results = self.model.predict_sem_seg(imgs, batch_data_samples)
                     self.time_stats['predict_sem_seg'] += time.perf_counter() - semseg_start
                     # pbar.update(1)  # Update progress bar (once per completed image)
+                    if 'gt_instances' in results[0]:
+                        del results[0].gt_instances
                     
                     # Extract metadata
                     img_path = batch_data_samples[0].metainfo['img_path']
@@ -132,7 +163,7 @@ class InferencePipeline:
     def _submit_cpu_stage1_task(self, imgs, results, img_path, transform, crs):
         """Submit CPU stage1 task to thread pool"""
         self.executor.submit(
-            self._process_cpu_stage1, 
+            self._process_cpu_stage1,
             imgs,
             results,
             img_path,
@@ -149,11 +180,15 @@ class InferencePipeline:
             with torch.no_grad():
                 results = self.model.predict_mosaic_sem_seg(imgs_cpu, results)
             self.time_stats['predict_mosaic_sem_seg'] += time.perf_counter() - mosaic_start
-            
+
+
+            cpu_throttle = threading.Semaphore(2)
             # seg2ins processing
             seg2ins_start = time.perf_counter()
             with torch.no_grad():
-                results = self.model.seg_poly_head.predict_seg2ins(imgs_cpu, results)
+                with cpu_throttle:
+                    results = self.model.seg_poly_head.predict_seg2ins(imgs_cpu, results)
+
             self.time_stats['predict_seg2ins'] += time.perf_counter() - seg2ins_start
             
             # sample_segments processing
@@ -171,6 +206,7 @@ class InferencePipeline:
                 'transform': transform,
                 'crs': crs
             })
+
         except Exception as e:
             print(f"CPU stage1 task error: {e}")
             self.active_tasks -= 1  # Reduce active task count
@@ -180,7 +216,6 @@ class InferencePipeline:
         while not self.gpu_task_queue.empty():
             # Get next GPU task
             task = self.gpu_task_queue.get_nowait()
-            print(f'start to process a {task["type"]} task')
             
             if task['type'] == 'gcp':
                 # GCP processing (GPU)
@@ -206,8 +241,8 @@ class InferencePipeline:
                 dp_start = time.perf_counter()
                 with torch.no_grad():
                     dp_results = self.model.seg_poly_head.poly_head.predict_dp(
-                        task['imgs'], 
-                        task['results']
+                        task['imgs'],
+                        task['results'],
                     )
                 self.time_stats['predict_dp'] += time.perf_counter() - dp_start
                 
@@ -264,23 +299,86 @@ class InferencePipeline:
             return
             
         try:
-            # Extract polygons
             poly_jsons = results[0].pred_instances['segmentations']
-            
-            # Create output path
-            file_name = os.path.basename(img_path).split('.')[0]
-            out_dir = self.save_cfg['out_dir']
-            out_path = os.path.join(out_dir, file_name + '.geojson')
+            file_name = results[0].metainfo['img_path'].split('/')[-1].split('.')[0]
+            height = results[0].seg_probs.shape[2]  # 图像高度
+            width = results[0].seg_probs.shape[3]   # 图像宽度
+            scores = results[0].scores
             out_scale = self.save_cfg.get('out_poly_scale', 1.0)
+
+            out_dir = self.save_cfg['out_dir']
+            flag_dir = os.path.join(out_dir, 'flag')
+            out_geojson_dir = os.path.join(out_dir, 'geojson')
+            out_tif_dir = os.path.join(out_dir, 'tif')
+            out_geojson_path = os.path.join(out_geojson_dir, file_name + '.geojson')
+            out_tif_path = os.path.join(out_tif_dir, file_name + '.tif')
+
+            file_name = results[0].metainfo['img_path'].split('/')[-1].split('.')[0]
+            start_flag_path = os.path.join(flag_dir, f'{file_name}.start')
+            finish_flag_path = os.path.join(flag_dir, f'{file_name}.finish')
+
+            if os.path.exists(os.path.join(finish_flag_path)):
+                print(f'{file_name} has already been processed, skip it.')
+                return
+
             
             # Save polygons
             polygon_utils.save_polygons(
                 poly_jsons, 
                 transform, 
                 crs, 
-                out_path, 
-                out_scale
+                out_geojson_path, 
+                out_scale,
+                properties=dict(scores=scores)
             )
+
+            original_transform = results[0].metainfo['tif_meta']['transform']
+
+            pixel_size_x = original_transform.a / 8
+            pixel_size_y = original_transform.e / 8
+
+            adjusted_transform = Affine(
+                pixel_size_x,            # 新的x方向分辨率
+                0,                       # 无旋转
+                original_transform.c,    # 左上角x坐标保持不变
+                0,                       # 无旋转
+                pixel_size_y,            # 新的y方向分辨率
+                original_transform.f      # 左上角y坐标保持不变
+            )
+
+            if adjusted_transform.e > 0:
+                # 确保y方向分辨率为负值（图像从上到下）
+                adjusted_transform = Affine(
+                    adjusted_transform.a,
+                    adjusted_transform.b,
+                    adjusted_transform.c,
+                    adjusted_transform.d,
+                    -adjusted_transform.e,
+                    adjusted_transform.f
+                )
+            seg_probs = (results[0].seg_probs[0,1] * 255).clip(0, 255).to(torch.uint8) # (H, W)
+            profile = {
+                'driver': 'GTiff',
+                'height': height,
+                'width': width,
+                'count': 1,  # 单波段
+                'dtype': rasterio.uint8,
+                'crs': crs,
+                'transform': adjusted_transform,
+                'compress': 'lzw',  # 压缩
+                'nodata': None         # 无数据值
+            }
+
+            if os.path.exists(os.path.join(finish_flag_path)):
+                print(f'{file_name} has already been processed, skip it.')
+                return
+
+            with rasterio.open(out_tif_path, 'w', **profile) as dst:
+                dst.write(seg_probs, 1)
+
+            with open(finish_flag_path, 'w') as _:
+                pass
+
         except Exception as e:
             print(f"Error saving results for {img_path}: {e}")
     

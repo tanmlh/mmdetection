@@ -6,6 +6,8 @@ from pathlib import Path
 import pdb
 import os
 from tqdm import tqdm
+import rasterio
+from rasterio.transform import Affine
 
 import numpy as np
 import torch
@@ -99,6 +101,7 @@ def inference(args, logger):
     init_default_scope(cfg.get('default_scope', 'mmdet'))
 
     result = {}
+    cfg.test_dataloader['sampler']['shuffle'] = True
     data_loader = Runner.build_dataloader(cfg.test_dataloader)
     model = MODELS.build(cfg.model)
     if 'load_from' in cfg:
@@ -113,7 +116,7 @@ def inference(args, logger):
         model=model,
         num_images=len(data_loader),
         save_cfg=save_cfg,
-        cpu_workers=2
+        cpu_workers=8
     )
     results = pipeline.run(data_loader)
 
@@ -139,16 +142,73 @@ def inference(args, logger):
         if save_cfg.get('save_results', False):
             poly_jsons = results[0].pred_instances['segmentations']
             file_name = results[0].metainfo['img_path'].split('/')[-1].split('.')[0]
+            height = results[0].seg_probs.shape[2]  # 图像高度
+            width = results[0].seg_probs.shape[3]   # 图像宽度
+
             out_dir = save_cfg['out_dir']
-            out_path = os.path.join(out_dir, file_name + '.geojson')
+            out_geojson_dir = os.path.join(out_dir, 'geojson')
+            out_tif_dir = os.path.join(out_dir, 'tif')
+            os.makedirs(out_geojson_dir, exist_ok=True)
+            os.makedirs(out_tif_dir, exist_ok=True)
+
+            out_geojson_path = os.path.join(out_geojson_dir, file_name + '.geojson')
+            out_tif_path = os.path.join(out_tif_dir, file_name + '.tif')
+
             out_scale = save_cfg.get('out_poly_scale', 1.0)
 
             os.makedirs(out_dir, exist_ok=True)
 
             transform = results[0].metainfo['tif_meta']['transform']
             crs = results[0].metainfo['tif_meta']['crs']
-            polygon_utils.save_polygons(poly_jsons, transform, crs, out_path, out_scale)
+            scores = results[0].scores
+
+            polygon_utils.save_polygons(
+                poly_jsons, transform, crs, out_geojson_path, out_scale,
+                properties=dict(scores=results[0].scores)
+            )
+
+
+            original_transform = results[0].metainfo['tif_meta']['transform']
+
+            pixel_size_x = original_transform.a / 8
+            pixel_size_y = original_transform.e / 8
+
+            adjusted_transform = Affine(
+                pixel_size_x,            # 新的x方向分辨率
+                0,                       # 无旋转
+                original_transform.c,    # 左上角x坐标保持不变
+                0,                       # 无旋转
+                pixel_size_y,            # 新的y方向分辨率
+                original_transform.f      # 左上角y坐标保持不变
+            )
+
+            if adjusted_transform.e > 0:
+                # 确保y方向分辨率为负值（图像从上到下）
+                adjusted_transform = Affine(
+                    adjusted_transform.a,
+                    adjusted_transform.b,
+                    adjusted_transform.c,
+                    adjusted_transform.d,
+                    -adjusted_transform.e,
+                    adjusted_transform.f
+                )
+            seg_probs = results[0].seg_probs[0,1] # (H, W)
+            profile = {
+                'driver': 'GTiff',
+                'height': height,
+                'width': width,
+                'count': 1,  # 单波段
+                'dtype': rasterio.float32,
+                'crs': crs,
+                'transform': adjusted_transform,
+                'compress': 'lzw',  # 压缩
+                'nodata': 0         # 无数据值
+            }
+
+            with rasterio.open(out_tif_path, 'w', **profile) as dst:
+                dst.write(seg_probs, 1)
     """
+
 
     del data_loader
 

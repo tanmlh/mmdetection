@@ -149,6 +149,7 @@ class SegBasedDetector(BaseDetector):
         self, batch_inputs: Tensor, batch_data_samples: SampleList,
         rescale: bool = True) -> Tensor:
 
+
         inf_cfg = self.test_cfg.get('inf_cfg', {})
 
         batch_size, _, h_img, w_img = batch_inputs.size()
@@ -179,7 +180,6 @@ class SegBasedDetector(BaseDetector):
         assert batch_size == 1
         split_batch_size = inf_cfg.get('split_batch_size', 4)
 
-
         selected_crop_imgs = []
         selected_crop_boxes = []
         for crop_idx, crop_box in enumerate(crop_boxes):
@@ -201,6 +201,7 @@ class SegBasedDetector(BaseDetector):
 
         # for j in range(len(splits) - 1):
         for j in tqdm(range(len(splits) - 1), desc='extracting building footprint...'):
+            t0 = time.time()
             cur_crop_boxes = torch.tensor(
                 np.stack(selected_crop_boxes[splits[j]:splits[j+1]]), device=batch_inputs.device
             )
@@ -232,11 +233,8 @@ class SegBasedDetector(BaseDetector):
 
             pseudo_meta_infos = [data_sample.metainfo for data_sample in pseudo_data_samples]
             pred_sem_seg = self.seg_head.predict(seg_feats, pseudo_meta_infos, None)
-            # t0 = time.time()
-            # pred_sem_seg = pred_sem_seg.cpu()
+
             pred_sem_seg = pred_sem_seg.to('cpu', non_blocking=True)
-            # t1 = time.time()
-            # print(f'GPU to CPU time: {t1-t0}')
 
             sem_seg_list = [
                 InstanceData(

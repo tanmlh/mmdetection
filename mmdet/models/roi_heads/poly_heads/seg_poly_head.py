@@ -208,7 +208,7 @@ class SegPolyHead(BaseModule):
 
         return losses
 
-    def predict_seg2ins(self, imgs,  batch_data_samples):
+    def predict_seg2ins(self, imgs, batch_data_samples):
 
         seg_logits = batch_data_samples[0].seg_logits
         B, C, H, W = seg_logits.shape
@@ -216,13 +216,8 @@ class SegPolyHead(BaseModule):
 
         seg_probs = F.softmax(seg_logits, dim=1)
         seg_mask = (seg_probs[:,1] > sem_seg_thr).long()
-        pixel_data = PixelData(sem_seg=seg_mask)
-
         batch_data_samples[0].seg_probs = seg_probs
-        batch_data_samples[0].seg_mask = seg_mask
-        batch_data_samples[0].pred_sem_seg = pixel_data
-        seg_probs = batch_data_samples[0].seg_probs
-        seg_mask = batch_data_samples[0].seg_mask
+        del batch_data_samples[0].seg_logits
 
         if self.seg2ins_head is not None:
             pred_polys, scores = self.seg2ins_head.predict(imgs[0], seg_probs[0, 1], batch_data_samples)
