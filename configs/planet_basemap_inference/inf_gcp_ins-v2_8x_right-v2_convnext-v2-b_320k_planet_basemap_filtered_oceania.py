@@ -1,6 +1,5 @@
 _base_ = [
-    # '../_base_/datasets/planet_basemap_single_ann_2023q2_global_8x_test-20k.py',
-    '../_base_/datasets/planet_basemap_large-scene_8x_2023q2_test-20k.py',
+    '../_base_/datasets/planet_basemap_large-scene_8x_2023q2_filtered_oceania.py',
     '../_base_/default_runtime.py',
 ]
 
@@ -169,7 +168,7 @@ log_processor = dict(type='LogProcessor', window_size=50, by_epoch=False)
 
 save_cfg=dict(
     save_results=True,
-    out_dir = '/home/fahong/Datasets/ai4eo3/Global3D_v2/inference_results/polygons/gcp_right-v2_50e_8x_test-20k',
+    out_dir = '/home/fahong/Datasets/ai4eo3/Global3D_v2/inference_results/polygons/gcp_right-v2_50e_8x',
     out_poly_scale=1/8.,
 )
 
@@ -206,3 +205,9 @@ visualizer = dict(
 )
 # find_unused_parameters=True
 
+
+test_dataloader = dict(
+    num_workers=0,
+    dataset=dict(
+    )
+)
