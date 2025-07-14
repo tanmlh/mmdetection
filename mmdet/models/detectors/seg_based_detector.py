@@ -199,8 +199,8 @@ class SegBasedDetector(BaseDetector):
         if self.seg_head is not None:
             merged_sem_seg_list = []
 
-        # for j in range(len(splits) - 1):
-        for j in tqdm(range(len(splits) - 1), desc='extracting building footprint...'):
+        for j in range(len(splits) - 1):
+        # for j in tqdm(range(len(splits) - 1), desc='extracting building footprint...'):
             t0 = time.time()
             cur_crop_boxes = torch.tensor(
                 np.stack(selected_crop_boxes[splits[j]:splits[j+1]]), device=batch_inputs.device

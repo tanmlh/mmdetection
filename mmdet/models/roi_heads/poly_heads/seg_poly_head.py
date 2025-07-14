@@ -238,7 +238,7 @@ class SegPolyHead(BaseModule):
             scores = torch.tensor([scores[x-1] for x in colors])
 
         batch_data_samples[0].pred_polys = pred_polys
-        batch_data_samples[0].scores = scores
+        batch_data_samples[0].scores = scores.tolist()
 
         return batch_data_samples
 

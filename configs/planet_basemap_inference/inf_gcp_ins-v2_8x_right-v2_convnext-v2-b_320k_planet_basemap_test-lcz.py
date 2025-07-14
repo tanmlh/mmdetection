@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/datasets/planet_basemap_large-scene_8x_2023q2_test-6k.py',
+    '../_base_/datasets/planet_basemap_large-scene_8x_lcz_42.py',
     '../_base_/default_runtime.py',
 ]
 
@@ -136,7 +136,7 @@ model = dict(
     ),
     test_cfg=dict(
         inf_cfg=dict(
-            mode='slide', crop_size=(256, 256), stride=(192, 192),
+            mode='slide', crop_size=(256, 256), stride=(128, 128),
             crop_up_size=(2048, 2048),
             out_size=None, out_size_scale=8.,
             filter_border_width = 0,
@@ -168,7 +168,7 @@ log_processor = dict(type='LogProcessor', window_size=50, by_epoch=False)
 
 save_cfg=dict(
     save_results=True,
-    out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/temp',
+    out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_lcz/gcp',
     out_poly_scale=1/8.,
 )
 
@@ -205,9 +205,3 @@ visualizer = dict(
 )
 # find_unused_parameters=True
 
-
-test_dataloader = dict(
-    num_workers=1,
-    dataset=dict(
-    )
-)
