@@ -375,39 +375,41 @@ class GCPPolyHead(nn.Module):
         K, N, _ = poly_pred.shape
         C = self.feat_channels
 
-        if mask_feat is not None:
-            norm_poly_pred = (poly_pred / W - 0.5) * 2
-            point_feat_list = []
-            b, c, h, w = mask_feat.shape
-            for i, cur_mask_feat in enumerate(mask_feat):
-                cur_norm_poly_pred = norm_poly_pred[batch_idxes == i].unsqueeze(0)
-                _, cur_K, cur_N, _ = cur_norm_poly_pred.shape
+        if self.poly_cfg.get('disable_mask_feat', False):
+            mask_feat = torch.zeros_like(mask_feat)
 
-                if self.poly_cfg.get('unfold_cfg', {}) != {}:
-                    unfold_cfg = self.poly_cfg['unfold_cfg']
-                    kernel_size = unfold_cfg.get('kernel_size', 7)
-                    cur_norm_poly_pred = polygon_utils.sample_neighborhood_points(
-                        cur_norm_poly_pred, kernel_size, 1
-                    ).view(1, cur_K, cur_N * kernel_size ** 2, 2)
+        norm_poly_pred = (poly_pred / W - 0.5) * 2
+        point_feat_list = []
+        b, c, h, w = mask_feat.shape
+        for i, cur_mask_feat in enumerate(mask_feat):
+            cur_norm_poly_pred = norm_poly_pred[batch_idxes == i].unsqueeze(0)
+            _, cur_K, cur_N, _ = cur_norm_poly_pred.shape
 
-                    # unfolded = F.unfold(mask_feat, **unfold_cfg)
-                    # unfolded = unfolded.view(b, c*kernel_size**2, h, w)
+            if self.poly_cfg.get('unfold_cfg', {}) != {}:
+                unfold_cfg = self.poly_cfg['unfold_cfg']
+                kernel_size = unfold_cfg.get('kernel_size', 7)
+                cur_norm_poly_pred = polygon_utils.sample_neighborhood_points(
+                    cur_norm_poly_pred, kernel_size, 1
+                ).view(1, cur_K, cur_N * kernel_size ** 2, 2)
 
-                t2 = time.time()
+                # unfolded = F.unfold(mask_feat, **unfold_cfg)
+                # unfolded = unfolded.view(b, c*kernel_size**2, h, w)
 
-                point_feat = F.grid_sample(
-                    cur_mask_feat[None], cur_norm_poly_pred.to(cur_mask_feat.device),
-                    align_corners=True
-                )
-                point_feat = point_feat.permute(0,2,3,1).squeeze(0).to(poly_pred.device)
+            t2 = time.time()
 
-                if self.poly_cfg.get('unfold_cfg', {}) != {}:
-                    point_feat = point_feat.reshape(cur_K, cur_N, kernel_size**2 * c)
+            point_feat = F.grid_sample(
+                cur_mask_feat[None], cur_norm_poly_pred.to(cur_mask_feat.device),
+                align_corners=True
+            )
+            point_feat = point_feat.permute(0,2,3,1).squeeze(0).to(poly_pred.device)
 
-                point_feat_list.append(point_feat)
-                t3 = time.time()
+            if self.poly_cfg.get('unfold_cfg', {}) != {}:
+                point_feat = point_feat.reshape(cur_K, cur_N, kernel_size**2 * c)
 
-            poly_feat = torch.cat(point_feat_list, dim=0)
+            point_feat_list.append(point_feat)
+            t3 = time.time()
+
+        poly_feat = torch.cat(point_feat_list, dim=0)
 
         return poly_feat
 

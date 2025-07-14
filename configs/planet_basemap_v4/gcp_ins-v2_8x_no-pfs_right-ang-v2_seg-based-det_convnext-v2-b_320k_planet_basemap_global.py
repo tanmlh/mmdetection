@@ -4,7 +4,7 @@ _base_ = [
 
 custom_imports = dict(
     imports=['mmpretrain.models'], allow_failed_imports=False)
-# load_from = 'work_dirs/st-mask-rcnn_merged_min-bbox-2_iou-thr-03_r50_100e_planet_basemap_sample-europe/epoch_80.pth'
+load_from = 'work_dirs/seg-based-det_8x_multi-source_convnext-v2-b_50e_planet_basemap_global/epoch_50.pth'
 
 model = dict(
     type='SegBasedDetector',
@@ -19,7 +19,9 @@ model = dict(
         pad_seg=True,
         seg_pad_value=255,
     ),
-    frozen_parameters=[],
+    frozen_parameters=[
+        'backbone', 'seg_head',
+    ],
     backbone=dict(
         type='mmpretrain.ConvNeXt',
         arch='base',
@@ -52,17 +54,80 @@ model = dict(
     seg_poly_head=dict(
         type='SegPolyHead',
         poly_cfg=dict(
-            poly_iou_thr=0.5,
-            train_poly_head=False,
-            sem_seg_thr=0.5,
+            poly_iou_thr=0.3,
+            max_offsets=20,
+            train_poly_head=True,
+            sem_seg_thr=0.4,
             num_max_sample=200,
             train_seg2ins_head=False,
+            use_roi_mask_feat=False
         ),
         seg2ins_head=dict(
             type='ClusterSeg2InsHead',
             poly_cfg=dict(
-                sem_seg_thr=0.5,
-                diff_thr=0.1
+                sem_seg_thr=0.4,
+                diff_thr=0.05,
+                cluster_mode='early_stop'
+            )
+        ),
+        poly_head=dict(
+            type='GCPPolyHead',
+            feat_channels=256,
+            in_feat_channels=7 * 7 * 5,
+            poly_cfg=dict(
+                unfold_cfg=dict(
+                    kernel_size=7, stride=1
+                ),
+                disable_mask_feat=True,
+                align_pred_gt=True,
+                sample_iou_thr=0.3,
+                num_max_sample=200,
+                num_inter_points=64,
+                step_size=16,
+                polygonized_scale=4.,
+                max_offsets=20,
+                use_decoded_feat_in_poly_feat=False,
+                num_cls_channels=2,
+                stride_size=64,
+                lam=4,
+                max_align_dis=16,
+                num_min_bins=32,
+                loss_weight_dp=0.01,
+                max_step_size=128,
+                apply_right_angle_loss=True,
+                apply_angle_loss=False
+            ),
+            decoder=dict(  # Mask2FormerTransformerDecoder
+                return_intermediate=True,
+                num_layers=3,
+                layer_cfg=dict(  # Mask2FormerTransformerDecoderLayer
+                    self_attn_cfg=dict(  # MultiheadAttention
+                        embed_dims=256,
+                        num_heads=8,
+                        dropout=0.0,
+                        batch_first=True),
+                    cross_attn_cfg=dict(  # MultiheadAttention
+                        embed_dims=256,
+                        num_heads=8,
+                        dropout=0.0,
+                        batch_first=True),
+                    ffn_cfg=dict(
+                        embed_dims=256,
+                        feedforward_channels=2048,
+                        num_fcs=2,
+                        ffn_drop=0.0,
+                        act_cfg=dict(type='ReLU', inplace=True)
+                    )),
+                init_cfg=None),
+            loss_poly_reg=dict(
+                type='SmoothL1Loss',
+                reduction='mean',
+                loss_weight=1.
+            ),
+            loss_poly_right_ang = dict(
+                type='SmoothL1Loss',
+                reduction='mean',
+                loss_weight=10.
             )
         )
     ),
@@ -83,7 +148,7 @@ model = dict(
             out_size=None, out_size_scale=1.,
             filter_border_width = 0,
             sem_seg_type='sem_seg',
-            sem_seg_thr=0.5,
+            sem_seg_thr=0.4,
             eval_proposal=False
         ),
         post_cfg = dict(
@@ -100,7 +165,7 @@ model = dict(
                 iou_thr=0.8
             ),
             out_cfg=dict(
-                save_results=True,
+                save_results=False,
                 out_dir='./work_dirs/basemap_pred_results/st-mark-rcnn-v2_convnext-v2-b',
                 out_poly_scale=1/4.,
             )
@@ -122,7 +187,7 @@ val_evaluator = [
         # split_meta_key='continent',
         backend_args={{_base_.backend_args}},
         out_cfg=dict(
-            save_results=True,
+            save_results=False,
             out_dir='./work_dirs/basemap_pred_results/st-mark-rcnn-v2_convnext-v2-b',
             out_size=(256, 256)
         ),
@@ -153,7 +218,7 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=50
+max_iters=320000
 param_scheduler = [
     # dict(
     #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
@@ -161,25 +226,25 @@ param_scheduler = [
     dict(
         type='MultiStepLR',
         begin=0,
-        end=max_epochs,
-        by_epoch=True,
-        milestones=[40],
+        end=320000,
+        by_epoch=False,
+        milestones=[256000],
         gamma=0.1)
 ]
 
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=max_epochs, val_interval=1)
-# train_cfg = dict(type='IterBasedTrainLoop', max_iters=800000, val_interval=200)
+# train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=max_epochs, val_interval=1)
+train_cfg = dict(type='IterBasedTrainLoop', max_iters=320000, val_interval=16000)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
-log_processor = dict(type='LogProcessor', window_size=50, by_epoch=True)
+log_processor = dict(type='LogProcessor', window_size=50, by_epoch=False)
 
 default_hooks = dict(
     checkpoint=dict(
         type='CheckpointHook',
-        by_epoch=True,
+        by_epoch=False,
         save_last=True,
         max_keep_ckpts=10,
-        interval=1),
+        interval=8000),
     ema=dict(
         type='EMAHook', momentum=0.01, interval=1
     ),
@@ -193,17 +258,18 @@ vis_backends = [
         init_kwargs=dict(
             project = 'planet_basemap',
             entity = 'tum-tanmlh',
-            name = 'ins-cluster_seg-based-det_8x_multi-source_convnext-v2-b_50e_planet_basemap_global',
+            name = 'gcp_ins-v2_8x_no-pfs_right-ang-v2_seg-based-det_convnext-v2-b_320k_planet_basemap_global',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
-# vis_backends = [dict(type='LocalVisBackend')]
+vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
+# find_unused_parameters=True
 
 
 # Default setting for scaling LR automatically
@@ -214,13 +280,13 @@ auto_scale_lr = dict(enable=True, base_batch_size=2)
 
 train_dataloader = dict(
     batch_size=2,
-    num_workers=4,
+    num_workers=8,
+    persistent_workers=True,
     dataset=dict(
         ann_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v2/merged_ann_v2',
         ann_cfg=dict(
             ann_path_pattern = '{img_name}.json',
             ann_type='json',
-            # used_source=['osm'],
         ),
         min_bbox_w=2,
     )
