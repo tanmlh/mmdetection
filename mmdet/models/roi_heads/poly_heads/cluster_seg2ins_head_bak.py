@@ -88,32 +88,28 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
     touched = np.zeros(N, dtype=np.bool_)  # Track clusters involved in multi-merges
     valid = np.ones(N, dtype=np.bool_)      # True if cluster is never part of multi-merge
 
-    # neigh_r = np.array([-1, 1, 0, 0], dtype=np.int64)
-    # neigh_c = np.array([0, 0, -1, 1], dtype=np.int64)
+    neigh_r = np.array([-1, 1, 0, 0], dtype=np.int64)
+    neigh_c = np.array([0, 0, -1, 1], dtype=np.int64)
 
-    neigh_r = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int64)
-    neigh_c = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int64)
-
-    # neigh_r, neigh_c = [], []
-    # for dr in range(-5 * 2, 6 * 2):       # -2 to 2 inclusive
-    #     for dc in range(-5 * 2, 6 * 2):
-    #         if dr == 0 and dc == 0:
-    #             continue  # skip the center
-    #         neigh_r.append(dr)
-    #         neigh_c.append(dc)
-    # neigh_r = np.array(neigh_r, dtype=np.int64)
-    # neigh_c = np.array(neigh_c, dtype=np.int64)
+    # neigh_r = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int64)
+    # neigh_c = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int64)
 
     for k in range(sorted_ids.shape[0]):
         pid = sorted_ids[k]
         row = idxes[pid, 0]
         col = idxes[pid, 1]
         cur_prob = probs[pid]
-        rep_list = np.empty(len(neigh_r), dtype=np.int64)
+        rep_list = np.empty(4, dtype=np.int64)
         rep_count = 0
 
-        # Check 8-connected neighbors
-        for j in range(len(neigh_r)):
+        # if k % 1000000 == 0:
+        #     # time.sleep(0.001) # release GIL lock for not blocking the main thread
+        #     temp = 0
+        #     for __ in range(1000000):
+        #         temp += 1
+
+        # Check 4-connected neighbors
+        for j in range(4):
             r = row + neigh_r[j]
             c = col + neigh_c[j]
             if r < 0 or r >= len(grid) or c < 0 or c >= len(grid[0]):
@@ -163,9 +159,7 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
             if (min_max - cur_prob) < diff_thr:
                 # Merge all clusters
                 rep = rep_list[0]
-                cur_touched = touched[rep]
                 for t in range(1, rep_count):
-                    cur_touched |= touched[rep_list[t]]
                     rep = union_numba(parent, size, center, max_prob, rep, rep_list[t])
                 parent[pid] = rep
                 new_size = size[rep] + 1
@@ -175,15 +169,13 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
                 if cur_prob > max_prob[rep]:
                     max_prob[rep] = cur_prob
                 # Mark as touched and invalid
-                touched[rep] = cur_touched
-                valid[pid] = not cur_touched
+                # touched[rep] = True
+                # valid[pid] = False
             else:
                 # Merge into closest cluster
                 best_rep = rep_list[0]
                 best_dist = (center[best_rep, 0] - row) ** 2 + (center[best_rep, 1] - col) ** 2
-                touched[best_rep] = True
                 for t in range(1, rep_count):
-                    touched[rep_list[t]] = True
                     rdist = (center[rep_list[t], 0] - row) ** 2 + (center[rep_list[t], 1] - col) ** 2
                     if rdist < best_dist:
                         best_rep = rep_list[t]
@@ -196,7 +188,7 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
                 if cur_prob > max_prob[best_rep]:
                     max_prob[best_rep] = cur_prob
                 # Mark as touched and invalid
-                # touched[best_rep] = True
+                touched[best_rep] = True
                 valid[pid] = False
 
         visited[pid] = True

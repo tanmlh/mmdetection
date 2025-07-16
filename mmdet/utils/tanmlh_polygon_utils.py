@@ -4940,6 +4940,7 @@ def polygonize_sliced_masks(labeled_mask, slices):
         # Extract the sub-mask from the labeled mask.
         # Note: The submask is a view of the full mask.
         submask = labeled_mask[slc] == cls_idx + 1
+        # submask = scipy.ndimage.binary_erosion(submask, structure=np.ones((3, 3)))
         
         # If no pixel is set in the submask, skip.
         if not submask.any():

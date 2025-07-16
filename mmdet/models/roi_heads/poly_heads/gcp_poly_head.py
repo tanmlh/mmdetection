@@ -656,7 +656,6 @@ class GCPPolyHead(nn.Module):
 
         return batch_data_samples
 
-
     def predict(self, imgs, batch_data_samples, device='cpu'):
 
         t0 = time.time()

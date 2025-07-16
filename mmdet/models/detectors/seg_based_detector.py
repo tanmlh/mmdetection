@@ -279,8 +279,10 @@ class SegBasedDetector(BaseDetector):
             offsets, mask_shape=mask_shape
         )
         seg_logits = merged_sem_seg.sem_seg
+        seg_probs = F.softmax(seg_logits, dim=1)
 
-        batch_data_samples[0].seg_logits = seg_logits
+        # batch_data_samples[0].seg_logits = seg_logits
+        batch_data_samples[0].seg_probs = seg_probs
 
         del batch_data_samples[0].merged_sem_seg_list
         del batch_data_samples[0].offsets

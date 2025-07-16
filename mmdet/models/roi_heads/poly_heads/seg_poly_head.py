@@ -210,14 +210,15 @@ class SegPolyHead(BaseModule):
 
     def predict_seg2ins(self, imgs, batch_data_samples):
 
-        seg_logits = batch_data_samples[0].seg_logits
-        B, C, H, W = seg_logits.shape
+        seg_probs = batch_data_samples[0].seg_probs
+        B, C, H, W = seg_probs.shape
         sem_seg_thr = self.poly_cfg.get('sem_seg_thr', 0.5)
 
-        seg_probs = F.softmax(seg_logits, dim=1)
         seg_mask = (seg_probs[:,1] > sem_seg_thr).long()
-        batch_data_samples[0].seg_probs = seg_probs
-        del batch_data_samples[0].seg_logits
+
+        # seg_probs = F.softmax(seg_logits, dim=1)
+        # batch_data_samples[0].seg_probs = seg_probs
+        # del batch_data_samples[0].seg_probs
 
         if self.seg2ins_head is not None:
             pred_polys, scores = self.seg2ins_head.predict(imgs[0], seg_probs[0, 1], batch_data_samples)
@@ -239,6 +240,21 @@ class SegPolyHead(BaseModule):
 
         batch_data_samples[0].pred_polys = pred_polys
         batch_data_samples[0].scores = scores.tolist()
+
+        return batch_data_samples
+
+    def predict_prepare_instances(self, imgs, batch_data_samples):
+        seg_probs = batch_data_samples[0].seg_probs
+        polygons = batch_data_samples[0].pred_polys
+        scores = batch_data_samples[0].scores
+        B, C, H, W = seg_probs.shape
+
+        seg_instances = InstanceData(segmentations=polygons, scores=scores)
+        seg_instances.polygon_masks = PolygonMasks.from_json(polygons, H, W)
+        seg_instances.bboxes = torch.tensor(seg_instances.polygon_masks.get_bounds())
+        seg_instances.labels = torch.zeros(len(seg_instances), dtype=torch.long)
+
+        batch_data_samples[0].pred_instances = seg_instances
 
         return batch_data_samples
 
