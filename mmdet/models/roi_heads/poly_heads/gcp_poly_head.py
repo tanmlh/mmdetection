@@ -83,22 +83,25 @@ class GCPPolyHead(nn.Module):
         t1 = time.time()
 
         if K == 0:
-            # naive_poly = {'type': 'Polygon', 'coordinates': [[[-1,-1], [-1,0], [0,0], [0,-1], [-1,-1]]]}
-            # pred_jsons = [naive_poly]
-            # gt_jsons = [naive_poly]
-            # kwargs['batch_idxes'] = torch.zeros(1, dtype=torch.long)
-            dummy_loss = self.poly_embed.parameters().__next__()[:0].sum()
-            losses = dict(
-                loss_dp=dummy_loss,
-                loss_poly_reg=dummy_loss,
-            )
-            if self.poly_cfg.get('apply_right_angle_loss', False):
-                losses['loss_poly_right_ang'] = dummy_loss
+            ### set a dummy pair of polygons to avoid no loss outputs
+            naive_poly = {'type': 'Polygon', 'coordinates': [[[0.,0.], [1.,0.], [1.,1.], [0.,1.], [0.,0.]]]}
+            pred_jsons = [naive_poly]
+            gt_jsons = [naive_poly]
+            kwargs['batch_idxes'] = torch.zeros(1, dtype=torch.long)
+            K = 1
 
-            if self.poly_cfg.get('apply_angle_loss', False):
-                losses['loss_poly_ang'] = dummy_loss
+            # dummy_loss = self.poly_embed.parameters().__next__()[:0].sum()
+            # losses = dict(
+            #     loss_dp=dummy_loss,
+            #     loss_poly_reg=dummy_loss,
+            # )
+            # if self.poly_cfg.get('apply_right_angle_loss', False):
+            #     losses['loss_poly_right_ang'] = dummy_loss
 
-            return losses
+            # if self.poly_cfg.get('apply_angle_loss', False):
+            #     losses['loss_poly_ang'] = dummy_loss
+
+            # return losses
 
         sampled_rings, _, _ = polygon_utils.sample_rings_from_json(
             pred_jsons, interval=self.poly_cfg.get('step_size'), only_exterior=True,
@@ -539,12 +542,17 @@ class GCPPolyHead(nn.Module):
         batch_idxes = batch_data_samples[0].get(
             'batch_idxes', torch.zeros(len(pred_polys), dtype=torch.long)
         )
+        mask_feat_type = self.poly_cfg.get('mask_feat_type', 'img_prob')
 
         N = self.poly_cfg.get('num_inter_points', 96)
         t0 = time.time()
 
         up_imgs = F.interpolate(imgs.cpu(), (H, W))
-        mask_feats = torch.cat([seg_probs, up_imgs], dim=1)
+
+        if mask_feat_type == 'img_prob':
+            mask_feats = torch.cat([seg_probs, up_imgs], dim=1)
+        elif mask_feat_type == 'prob':
+            mask_feats = seg_probs
 
         sampled_segs, seg_sizes, poly2segs_idxes, segs2poly_idxes = polygon_utils.sample_segments_from_json(
             pred_polys, interval=self.poly_cfg.get('step_size'),

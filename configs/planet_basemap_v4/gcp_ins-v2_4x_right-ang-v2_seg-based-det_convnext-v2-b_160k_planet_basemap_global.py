@@ -142,8 +142,8 @@ model = dict(
         #     up_feat_levels = [0,1,2,3]
         # ),
         inf_cfg=dict(
-            mode='slide', crop_size=(2048, 2048), stride=(2048, 2048),
-            crop_up_size=(2048, 2048),
+            mode='slide', crop_size=(1024, 1024), stride=(1024, 1024),
+            crop_up_size=(1024, 1024),
             out_size=None, out_size_scale=1.,
             filter_border_width = 0,
             sem_seg_type='sem_seg',
@@ -197,6 +197,12 @@ val_evaluator = [
 ]
 test_evaluator = val_evaluator
 
+save_cfg=dict(
+    save_results=True,
+    out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/gcp_seg_ct',
+    out_poly_scale=1/8.,
+)
+
 # optimizer
 embed_multi = dict(lr_mult=1.0, decay_mult=0.0)
 optim_wrapper = dict(
@@ -217,7 +223,7 @@ optim_wrapper = dict(
         norm_decay_mult=0.0),
     clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_iters=320000
+max_iters=160000
 param_scheduler = [
     # dict(
     #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
@@ -225,14 +231,14 @@ param_scheduler = [
     dict(
         type='MultiStepLR',
         begin=0,
-        end=320000,
+        end=160000,
         by_epoch=False,
-        milestones=[256000],
+        milestones=[120000],
         gamma=0.1)
 ]
 
 # train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=max_epochs, val_interval=1)
-train_cfg = dict(type='IterBasedTrainLoop', max_iters=320000, val_interval=16000)
+train_cfg = dict(type='IterBasedTrainLoop', max_iters=160000, val_interval=16000)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 log_processor = dict(type='LogProcessor', window_size=50, by_epoch=False)
@@ -243,12 +249,12 @@ default_hooks = dict(
         by_epoch=False,
         save_last=True,
         max_keep_ckpts=10,
-        interval=8000),
+        interval=16000),
     ema=dict(
         type='EMAHook', momentum=0.01, interval=1
     ),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5, score_thr=0.1)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5, score_thr=0.1)
 )
 
 vis_backends = [
@@ -257,7 +263,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'planet_basemap',
             entity = 'tum-tanmlh',
-            name = 'gcp_ins-v2_8x_right-ang-v2_seg-based-det_convnext-v2-b_320k_planet_basemap_global',
+            name = 'gcp_ins-v2_4x_right-ang-v2_seg-based-det_convnext-v2-b_320k_planet_basemap_global',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True

@@ -401,7 +401,7 @@ class PlanetMetric(BaseMetric):
             pred = data_sample['pred_instances']
             result['img_id'] = data_sample['img_id']
             result['bboxes'] = pred['bboxes'].cpu().numpy()
-            result['scores'] = pred['scores'].cpu().numpy()
+            result['scores'] = np.array(pred['scores'])
             result['labels'] = pred['labels'].cpu().numpy()
             # result['labels'] = np.zeros(len(pred['labels']))
             # if self.out_cfg.get('save_coco', False):

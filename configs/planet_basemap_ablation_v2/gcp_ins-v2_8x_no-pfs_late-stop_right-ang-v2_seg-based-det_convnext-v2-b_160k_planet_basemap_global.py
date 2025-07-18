@@ -4,7 +4,7 @@ _base_ = [
 
 custom_imports = dict(
     imports=['mmpretrain.models'], allow_failed_imports=False)
-# load_from = 'work_dirs/st-mask-rcnn_merged_min-bbox-2_iou-thr-03_r50_100e_planet_basemap_sample-europe/epoch_80.pth'
+load_from = 'work_dirs/seg-based-det_8x_multi-source_convnext-v2-b_50e_planet_basemap_global/epoch_50.pth'
 
 model = dict(
     type='SegBasedDetector',
@@ -19,7 +19,9 @@ model = dict(
         pad_seg=True,
         seg_pad_value=255,
     ),
-    frozen_parameters=[],
+    frozen_parameters=[
+        'backbone', 'seg_head',
+    ],
     backbone=dict(
         type='mmpretrain.ConvNeXt',
         arch='base',
@@ -52,19 +54,84 @@ model = dict(
     seg_poly_head=dict(
         type='SegPolyHead',
         poly_cfg=dict(
-            poly_iou_thr=0.5,
-            train_poly_head=False,
-            sem_seg_thr=0.5,
+            poly_iou_thr=0.3,
+            max_offsets=20,
+            train_poly_head=True,
+            sem_seg_thr=0.4,
             num_max_sample=200,
             train_seg2ins_head=False,
-            diff_thr=0.05
+            use_roi_mask_feat=False
         ),
-        # seg2ins_head=dict(
-        #     type='ClusterSeg2InsHead',
-        #     poly_cfg=dict(
-        #         sem_seg_thr=0.5
-        #     )
-        # ),
+        seg2ins_head=dict(
+            type='ClusterSeg2InsHead',
+            poly_cfg=dict(
+                sem_seg_thr=0.4,
+                diff_thr=0.05,
+                cluster_mode='late_stop'
+            )
+        ),
+        poly_head=dict(
+            type='GCPPolyHead',
+            feat_channels=256,
+            in_feat_channels=7 * 7 * 2,
+            poly_cfg=dict(
+                unfold_cfg=dict(
+                    kernel_size=7, stride=1
+                ),
+                # mask_feat_type='img_prob',
+                disable_mask_feat=True,
+                mask_feat_type='prob',
+                align_pred_gt=True,
+                sample_iou_thr=0.3,
+                num_max_sample=200,
+                num_inter_points=64,
+                step_size=16,
+                polygonized_scale=4.,
+                max_offsets=20,
+                use_decoded_feat_in_poly_feat=False,
+                num_cls_channels=2,
+                stride_size=64,
+                lam=4,
+                max_align_dis=16,
+                num_min_bins=32,
+                loss_weight_dp=0.01,
+                max_step_size=128,
+                apply_right_angle_loss=True,
+                apply_angle_loss=False
+            ),
+            decoder=dict(  # Mask2FormerTransformerDecoder
+                return_intermediate=True,
+                num_layers=3,
+                layer_cfg=dict(  # Mask2FormerTransformerDecoderLayer
+                    self_attn_cfg=dict(  # MultiheadAttention
+                        embed_dims=256,
+                        num_heads=8,
+                        dropout=0.0,
+                        batch_first=True),
+                    cross_attn_cfg=dict(  # MultiheadAttention
+                        embed_dims=256,
+                        num_heads=8,
+                        dropout=0.0,
+                        batch_first=True),
+                    ffn_cfg=dict(
+                        embed_dims=256,
+                        feedforward_channels=2048,
+                        num_fcs=2,
+                        ffn_drop=0.0,
+                        act_cfg=dict(type='ReLU', inplace=True)
+                    )),
+                init_cfg=None),
+            loss_poly_reg=dict(
+                type='SmoothL1Loss',
+                reduction='mean',
+                loss_weight=1.
+            ),
+            loss_poly_right_ang = dict(
+                type='SmoothL1Loss',
+                reduction='mean',
+                loss_weight=10.
+            )
+        )
     ),
     # model training and testing settings
     train_cfg=dict(
@@ -83,7 +150,7 @@ model = dict(
             out_size=None, out_size_scale=1.,
             filter_border_width = 0,
             sem_seg_type='sem_seg',
-            sem_seg_thr=0.5,
+            sem_seg_thr=0.4,
             eval_proposal=False
         ),
         post_cfg = dict(
@@ -100,7 +167,7 @@ model = dict(
                 iou_thr=0.8
             ),
             out_cfg=dict(
-                save_results=True,
+                save_results=False,
                 out_dir='./work_dirs/basemap_pred_results/st-mark-rcnn-v2_convnext-v2-b',
                 out_poly_scale=1/4.,
             )
@@ -136,25 +203,24 @@ test_evaluator = val_evaluator
 # optimizer
 embed_multi = dict(lr_mult=1.0, decay_mult=0.0)
 optim_wrapper = dict(
-    type='DeepSpeedOptimWrapper',
+    type='OptimWrapper',
     optimizer=dict(
         type='AdamW',
         lr=0.0001,
         weight_decay=0.05,
         eps=1e-8,
         betas=(0.9, 0.999)),
-    # paramwise_cfg=dict(
-    #     custom_keys={
-    #         'backbone': dict(lr_mult=0.1, decay_mult=1.0),
-    #         'query_embed': embed_multi,
-    #         'query_feat': embed_multi,
-    #         'level_embed': embed_multi,
-    #     },
-    #     norm_decay_mult=0.0),
-    # clip_grad=dict(max_norm=0.01, norm_type=2)
-)
+    paramwise_cfg=dict(
+        custom_keys={
+            'backbone': dict(lr_mult=0.1, decay_mult=1.0),
+            'query_embed': embed_multi,
+            'query_feat': embed_multi,
+            'level_embed': embed_multi,
+        },
+        norm_decay_mult=0.0),
+    clip_grad=dict(max_norm=0.01, norm_type=2))
 
-max_epochs=50
+max_iters=160000
 param_scheduler = [
     # dict(
     #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
@@ -162,30 +228,30 @@ param_scheduler = [
     dict(
         type='MultiStepLR',
         begin=0,
-        end=max_epochs,
-        by_epoch=True,
-        milestones=[40],
+        end=160000,
+        by_epoch=False,
+        milestones=[120000],
         gamma=0.1)
 ]
 
-train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=max_epochs, val_interval=1)
-# train_cfg = dict(type='IterBasedTrainLoop', max_iters=800000, val_interval=200)
+# train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=max_epochs, val_interval=1)
+train_cfg = dict(type='IterBasedTrainLoop', max_iters=160000, val_interval=16000)
 val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
-log_processor = dict(type='LogProcessor', window_size=50, by_epoch=True)
+log_processor = dict(type='LogProcessor', window_size=50, by_epoch=False)
 
 default_hooks = dict(
     checkpoint=dict(
         type='CheckpointHook',
-        by_epoch=True,
+        by_epoch=False,
         save_last=True,
         max_keep_ckpts=10,
-        interval=1),
-    # ema=dict(
-    #     type='EMAHook', momentum=0.01, interval=1
-    # ),
+        interval=16000),
+    ema=dict(
+        type='EMAHook', momentum=0.01, interval=1
+    ),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5, score_thr=0.1)
+    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5, score_thr=0.1)
 )
 
 vis_backends = [
@@ -194,17 +260,18 @@ vis_backends = [
         init_kwargs=dict(
             project = 'planet_basemap',
             entity = 'tum-tanmlh',
-            name = 'ds_seg-based-det_8x_multi-source_convnext-v2-b_50e_planet_basemap_global',
+            name = 'gcp_ins-v2_8x_no-pfs_late-stop_right-ang-v2_seg-based-det_convnext-v2-b_160k_planet_basemap_global',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
-vis_backends = [dict(type='LocalVisBackend')]
+# vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
+# find_unused_parameters=True
 
 
 # Default setting for scaling LR automatically
@@ -228,11 +295,10 @@ train_dataloader = dict(
 )
 
 val_dataloader = dict(
-    batch_size=2,
-    num_workers=1,
-    persistent_workers=True,
+    batch_size=1,
     dataset=dict(
         # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
         # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
         # ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
         ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
@@ -240,40 +306,15 @@ val_dataloader = dict(
     )
 )
 test_dataloader = dict(
-    batch_size=2,
-    num_workers=1,
     dataset=dict(
         # ann_file = 'coco_ann_full/filtered_test_global_quartely_2023q2.json',
         # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
         # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
         # ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
         # ann_file = 'coco_ann_global/test_continent_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
         # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
         ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
         min_bbox_w=2
     )
 )
-
-# runner_type = 'FlexibleRunner'
-# strategy = dict(
-#     type='DeepSpeedStrategy',
-#     fp16=dict(
-#         enabled=False,
-#         fp16_master_weights_and_grads=False,
-#         loss_scale=0,
-#         loss_scale_window=500,
-#         hysteresis=2,
-#         min_loss_scale=1,
-#         initial_scale_power=15,
-#     ),
-#     inputs_to_half=[0],
-#     zero_optimization=dict(
-#         stage=0,
-#         allgather_partitions=True,
-#         reduce_scatter=True,
-#         allgather_bucket_size=50000000,
-#         reduce_bucket_size=50000000,
-#         overlap_comm=True,
-#         contiguous_gradients=True,
-#         cpu_offload=False),
-# )

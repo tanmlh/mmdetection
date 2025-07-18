@@ -30,11 +30,6 @@ from mmdet.models.layers import Mask2FormerTransformerDecoder, SinePositionalEnc
 
 import shapely
 
-BYTES_PER_FLOAT = 4
-# TODO: This memory limit may be too much or too little. It would be better to
-#  determine it based on available resources.
-GPU_MEM_LIMIT = 1024**3  # 1 GB memory limit
-
 def make_cnn_stack(in_channels, out_channels, num_layers, kernel_size):
     layers = []
     for i in range(num_layers):
@@ -109,7 +104,6 @@ class SegPolyHead(BaseModule):
             losses.update(losses_seg2ins)
 
         if self.poly_cfg.get('train_poly_head', False):
-            mask_feats = torch.cat([sem_seg_probs, imgs], dim=1)
             losses_poly_head = self._cal_loss_poly_head(
                 imgs, seg_logits, batch_pred_polys, batch_data_samples
             )
@@ -183,7 +177,11 @@ class SegPolyHead(BaseModule):
             matched_gt_polys = matched_gt_polys[sample_idxes]
             batch_idxes = batch_idxes[sample_idxes]
 
-        mask_feats = torch.cat([sem_seg_probs, imgs], dim=1)
+        mask_feat_type = self.poly_head.poly_cfg.get('mask_feat_type', 'img_prob')
+        if mask_feat_type == 'img_prob':
+            mask_feats = torch.cat([sem_seg_probs, imgs], dim=1)
+        elif mask_feat_type == 'prob':
+            mask_feats = sem_seg_probs
 
         if self.poly_cfg.get('use_roi_mask_feat', False):
             bbox_buffer = self.poly_cfg.get('bbox_buffer', 2)

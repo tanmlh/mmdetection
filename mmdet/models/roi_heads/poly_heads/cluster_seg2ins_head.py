@@ -73,8 +73,8 @@ def union_numba(parent, size, center, max_prob, x, y):
             max_prob[ry] = max_prob[rx]
         return ry
 
-# @njit
-@njit(parallel=True)
+@njit
+# @njit(parallel=True)
 def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
     N = idxes.shape[0]
     parent = np.empty(N, dtype=np.int64)

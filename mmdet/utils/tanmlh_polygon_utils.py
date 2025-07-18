@@ -11,10 +11,7 @@ import geopandas as gpd
 import skimage
 import json
 import matplotlib.pyplot as plt
-# from descartes import PolygonPatch
 from matplotlib.collections import PatchCollection
-# from multiprocess import Pool
-# import multiprocess
 from tqdm import tqdm
 import cv2
 import pdb
