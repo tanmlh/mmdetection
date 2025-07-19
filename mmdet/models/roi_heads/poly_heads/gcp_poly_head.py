@@ -572,6 +572,8 @@ class GCPPolyHead(nn.Module):
 
             for i, (poly_pred, segs2poly_idxes) in enumerate(zip(poly_pred_list, segs2poly_idxes_list)):
                 poly_feat = self.get_init_poly_feat(poly_pred, W, mask_feats, batch_idxes[segs2poly_idxes])
+                # if poly_feat.sum().isnan():
+                #     pdb.set_trace()
                 poly_feat_list.append(poly_feat)
 
         batch_data_samples[0].sampled_segs = sampled_segs
