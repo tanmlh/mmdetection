@@ -96,7 +96,7 @@ model = dict(
                 num_min_bins=32,
                 loss_weight_dp=0.01,
                 max_step_size=128,
-                apply_right_angle_loss=True,
+                apply_right_angle_loss=False,
                 apply_angle_loss=False
             ),
             decoder=dict(  # Mask2FormerTransformerDecoder
@@ -247,9 +247,9 @@ default_hooks = dict(
         save_last=True,
         max_keep_ckpts=10,
         interval=16000),
-    ema=dict(
-        type='EMAHook', momentum=0.01, interval=1
-    ),
+    # ema=dict(
+    #     type='EMAHook', momentum=0.01, interval=1
+    # ),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
     # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5, score_thr=0.1)
 )
@@ -260,14 +260,14 @@ vis_backends = [
         init_kwargs=dict(
             project = 'planet_basemap',
             entity = 'tum-tanmlh',
-            name = 'gcp_ins-v2_8x_no-pfs_late-stop_right-ang-v2_seg-based-det_convnext-v2-b_160k_planet_basemap_global',
+            name = 'gcp_8x_no-pfs_late-stop_seg-based-det_convnext-v2-b_160k_planet_basemap_global',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
         ),
     )
 ]
-# vis_backends = [dict(type='LocalVisBackend')]
+vis_backends = [dict(type='LocalVisBackend')]
 visualizer = dict(
     type='TanmlhVisualizer', vis_backends=vis_backends, name='visualizer'
 )
