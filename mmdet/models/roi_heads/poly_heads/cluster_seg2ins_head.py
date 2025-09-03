@@ -174,7 +174,6 @@ def cluster_by_probs_core(idxes, probs, grid, sorted_ids, diff_thr, conn_thr):
                 size[rep] = new_size
                 if cur_prob > max_prob[rep]:
                     max_prob[rep] = cur_prob
-                # Mark as touched and invalid
                 touched[rep] = cur_touched
                 valid[pid] = not cur_touched
             else:

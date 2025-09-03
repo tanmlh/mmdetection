@@ -1,11 +1,10 @@
 _base_ = [
-    '../_base_/datasets/planet_basemap_large-scene_8x_2023q2_test-6k.py',
-    '../_base_/default_runtime.py',
+    '../_base_/datasets/planet_basemap_single_ann_2023q2_global_8x.py', '../_base_/default_runtime.py',
 ]
 
 custom_imports = dict(
     imports=['mmpretrain.models'], allow_failed_imports=False)
-load_from = 'work_dirs/gcp_8x_right-50_late-stop_seg-based-det_convnext-v2-b_160k_planet_basemap_global/iter_160000.pth'
+load_from = 'work_dirs/seg-based-det_8x_multi-source_convnext-v2-b_50e_planet_basemap_global/epoch_50.pth'
 
 model = dict(
     type='SegBasedDetector',
@@ -68,7 +67,6 @@ model = dict(
             poly_cfg=dict(
                 sem_seg_thr=0.4,
                 diff_thr=0.05,
-                # diff_thr=1e9,
                 cluster_mode='late_stop'
             )
         ),
@@ -131,24 +129,29 @@ model = dict(
             loss_poly_right_ang = dict(
                 type='SmoothL1Loss',
                 reduction='mean',
-                loss_weight=10.
+                loss_weight=50.
             )
         )
     ),
     # model training and testing settings
     train_cfg=dict(
         train_poly_head=False,
+        # seg_head=dict(
+        #     up_feat_levels = [0,1,2,3]
+        # ),
     ),
     test_cfg=dict(
+        # seg_head=dict(
+        #     up_feat_levels = [0,1,2,3]
+        # ),
         inf_cfg=dict(
-            mode='slide', crop_size=(256, 256), stride=(192, 192),
+            mode='slide', crop_size=(2048, 2048), stride=(2048, 2048),
             crop_up_size=(2048, 2048),
-            out_size=None, out_size_scale=8.,
+            out_size=None, out_size_scale=1.,
             filter_border_width = 0,
             sem_seg_type='sem_seg',
             sem_seg_thr=0.4,
-            eval_proposal=False,
-            split_batch_size=2,
+            eval_proposal=False
         ),
         post_cfg = dict(
             type='InstancePostProcessor',
@@ -251,14 +254,6 @@ default_hooks = dict(
     # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5, score_thr=0.1)
 )
 
-save_cfg=dict(
-    save_results=True,
-    out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/gcp',
-    # out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/gcp_ct',
-    out_poly_scale=1/8.,
-    prob_tif_pattern = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/tif_v3/{}.tif'
-)
-
 vis_backends = [
     dict(
         type='WandbVisBackend', save_dir='./wandb/',
@@ -284,3 +279,42 @@ visualizer = dict(
 #       or not by default.
 #   - `base_batch_size` = (8 GPUs) x (2 samples per GPU).
 auto_scale_lr = dict(enable=True, base_batch_size=2)
+
+train_dataloader = dict(
+    batch_size=2,
+    num_workers=8,
+    persistent_workers=True,
+    dataset=dict(
+        ann_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v2/merged_ann_v2',
+        ann_cfg=dict(
+            ann_path_pattern = '{img_name}.json',
+            ann_type='json',
+        ),
+        min_bbox_w=2,
+    )
+)
+
+val_dataloader = dict(
+    batch_size=1,
+    dataset=dict(
+        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
+        ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
+        min_bbox_w=2
+    )
+)
+test_dataloader = dict(
+    dataset=dict(
+        # ann_file = 'coco_ann_full/filtered_test_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_global/small_merged_test_continent_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_global/test_continent_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
+        # ann_file = 'coco_ann_full/small_merged_filtered_test_dp_global_quartely_2023q2.json',
+        ann_file = 'coco_ann_global/small_test_continent_global_quartely_2023q2.json',
+        min_bbox_w=2
+    )
+)

@@ -27,4 +27,3 @@ class PlanetBasemapNoAnnDataset(BaseSegDataset):
     METAINFO = dict(
         classes=('background', 'building'),
         palette=[(0, 0, 255), (255, 0, 0)])
-

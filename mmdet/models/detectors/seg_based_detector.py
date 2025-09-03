@@ -269,6 +269,8 @@ class SegBasedDetector(BaseDetector):
         merged_sem_seg_list = batch_data_samples[0].merged_sem_seg_list
         offsets = batch_data_samples[0].offsets
         mask_shape = batch_data_samples[0].mask_shape
+        inf_cfg = self.test_cfg.get('inf_cfg', {})
+        mosaic_type = inf_cfg.get('mosaic_type', 'gaussian_sum')
 
         all_seg_logits = torch.cat([x.sem_seg for x in merged_sem_seg_list], axis=0)
 
@@ -276,7 +278,8 @@ class SegBasedDetector(BaseDetector):
 
         merged_sem_seg = tanmlh_utils.mosaic_instance_data(
             merged_sem_seg_list,
-            offsets, mask_shape=mask_shape
+            offsets, mask_shape=mask_shape,
+            mosaic_type=mosaic_type
         )
         seg_logits = merged_sem_seg.sem_seg
         seg_probs = F.softmax(seg_logits, dim=1)

@@ -82,24 +82,35 @@ class InferencePipeline:
             
             # Start total time tracking
             total_start = time.perf_counter()
-            
-            # Create progress bar
+
+            dataset = data_loader.dataset
+
             with tqdm(total=self.num_images, desc='Processing images (0 active tasks)') as pbar:
+                # Create progress bar
+
                 # Process all images
-                for idx, data_batch in enumerate(data_loader):
-                    if idx >= self.num_images:
-                        break
-                    file_name = data_batch['data_samples'][0].metainfo['img_path'].split('/')[-1].split('.')[0]
+                # for idx, data_batch in enumerate(data_loader):
+                for idx in range(self.num_images):
+                    data_info = dataset.get_data_info(idx)
+                    file_name = data_info['img_path'].split('/')[-1].split('.')[0]
                     start_flag_path = os.path.join(flag_dir, f'{file_name}.start')
                     finish_flag_path = os.path.join(flag_dir, f'{file_name}.finish')
 
+                    # file_name = data_batch['data_samples'][0].metainfo['img_path'].split('/')[-1].split('.')[0]
+                    # start_flag_path = os.path.join(flag_dir, f'{file_name}.start')
+                    # finish_flag_path = os.path.join(flag_dir, f'{file_name}.finish')
+
                     if os.path.exists(start_flag_path) or os.path.exists(finish_flag_path):
                         print(f'{file_name} is under processing or has already been processed, skip it.')
+                        pbar.update(1)
                         continue
 
                     with open(start_flag_path, 'w') as _:
                         pass
 
+                    data_batch = dataset[idx]
+                    for key in data_batch.keys():
+                        data_batch[key] = [data_batch[key]]
 
                     # Update progress description
                     pbar.set_description(f"Processing images ({self.active_tasks} active tasks)")
@@ -292,18 +303,34 @@ class InferencePipeline:
         except Exception as e:
             print(f"CPU stage2 task error: {e}")
             self.active_tasks -= 1  # Reduce active task count
-    
+
+    @staticmethod
+    def extract_float_from_tensor(self, tensor_str: str) -> float:
+        """
+            tensor_str (str): tensor字符串，如"tensor(0.6510, dtype=torch.float64)"
+            float: 提取的浮点数
+        """
+        # 使用正则表达式匹配浮点数
+        match = re.search(r"[-+]?\d*\.\d+|\d+", tensor_str)
+        if match:
+            return float(match.group())
+        else:
+            return tensor_str
+
     def _save_results(self, results, img_path, transform, crs):
         """Save results to GeoJSON file in a background thread"""
         if not self.save_cfg.get('save_results', False):
             return
-            
+
         try:
             poly_jsons = results[0].pred_instances['segmentations']
             file_name = results[0].metainfo['img_path'].split('/')[-1].split('.')[0]
             height = results[0].seg_probs.shape[2]  # 图像高度
             width = results[0].seg_probs.shape[3]   # 图像宽度
             scores = results[0].scores
+            if type(scores) == torch.Tensor:
+                scores = [self.extract_float_from_tensor(score) for score in scores]
+
             out_scale = self.save_cfg.get('out_poly_scale', 1.0)
 
             out_dir = self.save_cfg['out_dir']
@@ -321,13 +348,12 @@ class InferencePipeline:
                 print(f'{file_name} has already been processed, skip it.')
                 return
 
-            
             # Save polygons
             polygon_utils.save_polygons(
-                poly_jsons, 
-                transform, 
-                crs, 
-                out_geojson_path, 
+                poly_jsons,
+                transform,
+                crs,
+                out_geojson_path,
                 out_scale,
                 properties=dict(scores=scores)
             )

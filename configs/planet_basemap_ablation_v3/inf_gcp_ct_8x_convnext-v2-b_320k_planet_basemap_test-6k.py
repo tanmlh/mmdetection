@@ -67,7 +67,7 @@ model = dict(
             type='ClusterSeg2InsHead',
             poly_cfg=dict(
                 sem_seg_thr=0.4,
-                diff_thr=1e9
+                diff_thr=1e9,
                 cluster_mode='late_stop'
             )
         ),

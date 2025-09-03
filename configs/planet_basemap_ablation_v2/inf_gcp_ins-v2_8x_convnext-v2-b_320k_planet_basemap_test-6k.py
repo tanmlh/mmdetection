@@ -168,7 +168,7 @@ log_processor = dict(type='LogProcessor', window_size=50, by_epoch=False)
 
 save_cfg=dict(
     save_results=True,
-    out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/gcp_no-rht',
+    out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/gcp_early_no-rht',
     out_poly_scale=1/8.,
 )
 

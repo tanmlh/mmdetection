@@ -5,7 +5,7 @@ _base_ = [
 
 custom_imports = dict(
     imports=['mmpretrain.models'], allow_failed_imports=False)
-load_from = 'work_dirs/gcp_8x_right-50_late-stop_seg-based-det_convnext-v2-b_160k_planet_basemap_global/iter_160000.pth'
+load_from = 'work_dirs/gcp_ins-v2_8x_right-ang-v2_seg-based-det_convnext-v2-b_320k_planet_basemap_global/iter_320000.pth'
 
 model = dict(
     type='SegBasedDetector',
@@ -67,22 +67,24 @@ model = dict(
             type='ClusterSeg2InsHead',
             poly_cfg=dict(
                 sem_seg_thr=0.4,
-                diff_thr=0.05,
+                diff_thr=0.1,
+                low_thr = 0.6,
                 # diff_thr=1e9,
-                cluster_mode='late_stop'
+                cluster_mode='early_stop'
+                # cluster_mode='late_stop'
             )
         ),
         poly_head=dict(
             type='GCPPolyHead',
             feat_channels=256,
-            in_feat_channels=7 * 7 * 2,
+            in_feat_channels=7 * 7 * 5,
             poly_cfg=dict(
                 unfold_cfg=dict(
                     kernel_size=7, stride=1
                 ),
-                # mask_feat_type='img_prob',
+                mask_feat_type='img_prob',
+                # mask_feat_type='prob',
                 disable_mask_feat=False,
-                mask_feat_type='prob',
                 align_pred_gt=True,
                 sample_iou_thr=0.3,
                 num_max_sample=200,
@@ -253,7 +255,8 @@ default_hooks = dict(
 
 save_cfg=dict(
     save_results=True,
-    out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/gcp',
+    out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/gcp_thr010',
+    # out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/gcp',
     # out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/gcp_ct',
     out_poly_scale=1/8.,
     prob_tif_pattern = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/tif_v3/{}.tif'

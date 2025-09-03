@@ -54,7 +54,7 @@ test_dataloader = dict(
         pipeline=test_pipeline,
         backend_args=backend_args,
         img_suffix='',
-        ann_file=f'{data_root}/filelist/filtered_world_cover_Oceania.txt',
+        ann_file=f'{data_root}/filelist/filtered_world_cover_Asia.txt',
         # data_prefix=dict(img_path='img'),
     )
 )

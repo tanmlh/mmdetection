@@ -141,12 +141,12 @@ def inference(args, logger):
                 results = model.predict_mosaic_sem_seg(imgs, batch_data_samples) # CPU
 
             results = model.seg_poly_head.predict_seg2ins(imgs, results) # CPU
-            results = model.seg_poly_head.predict_prepare_instances(imgs, results)
+            # results = model.seg_poly_head.predict_prepare_instances(imgs, results)
 
-            # results = model.seg_poly_head.poly_head.predict_sample_segments(imgs, results) # CPU
-            # results = model.seg_poly_head.poly_head.predict_gcp(imgs, results) # GPU
-            # results = model.seg_poly_head.poly_head.predict_assemble_segments(imgs, results) # CPU
-            # results = model.seg_poly_head.poly_head.predict_dp(imgs, results) # GPU
+            results = model.seg_poly_head.poly_head.predict_sample_segments(imgs, results) # CPU
+            results = model.seg_poly_head.poly_head.predict_gcp(imgs, results) # GPU
+            results = model.seg_poly_head.poly_head.predict_assemble_segments(imgs, results) # CPU
+            results = model.seg_poly_head.poly_head.predict_dp(imgs, results) # GPU
 
         if save_cfg.get('save_results', False):
             poly_jsons = results[0].pred_instances['segmentations']

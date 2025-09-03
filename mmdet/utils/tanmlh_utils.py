@@ -365,7 +365,7 @@ def vectorized_assemble_mask(all_seg_logits, offsets, mask_shape, assemble_type=
     result = (new_sem_seg / (cnt_sem_seg + 1e-8))[None]
     return result
 
-def mosaic_instance_data(instance_list, offsets, mask_shape=None, pad_shape=None, mask_up_scale=1.0, device='cpu'):
+def mosaic_instance_data(instance_list, offsets, mask_shape=None, pad_shape=None, mask_up_scale=1.0, device='cpu', mosaic_type='gaussian_sum'):
     assert len(instance_list) == len(offsets)
     offsets = offsets.repeat(1,2)
     merged_instance = InstanceData()
@@ -388,14 +388,13 @@ def mosaic_instance_data(instance_list, offsets, mask_shape=None, pad_shape=None
 
     if 'sem_seg' in instance_list[0]:
         N, C, h, w = instance_list[0].sem_seg.shape
-        mosaic_type = 'gaussian_sum'
 
         weights = torch.tensor(get_patch_weight(h), device=instance_list[0].sem_seg.device)
         new_sem_seg = instance_list[0].sem_seg.new_zeros(C, *mask_shape)
         cnt_sem_seg = instance_list[0].sem_seg.new_zeros(C, *mask_shape)
 
-        if mosaic_type == 'max_prob':
-            new_sem_seg[0] = 1e9
+        if mosaic_type == 'min_entropy':
+            ent_map = instance_list[0].sem_seg.new_zeros(*mask_shape) + 1e9
 
     for i, instance in enumerate(instance_list):
 
@@ -412,16 +411,21 @@ def mosaic_instance_data(instance_list, offsets, mask_shape=None, pad_shape=None
                         weighted_sem_seg[0, :, start_y2:end_y2, start_x2:end_x2]
                 cnt_sem_seg[:, max(start_y, 0):start_y+h, max(start_x, 0):start_x+w] += 1
 
-            elif mosaic_type == 'max_prob':
+            elif mosaic_type == 'min_entropy':
                 new_logits = instance.sem_seg[0]
                 cur_logits = new_sem_seg[:, max(start_y, 0):start_y+h, max(start_x, 0):start_x+w]
 
                 new_probs = F.softmax(new_logits, dim=1)
                 cur_probs = F.softmax(cur_logits, dim=1)
 
-                new_sem_seg[:, max(start_y, 0):start_y+h, max(start_x, 0):start_x+w] = \
-                        torch.where(new_probs[1] > cur_probs[1], new_logits, cur_logits)
+                cur_ent_map = ent_map[max(start_y, 0):start_y+h, max(start_x, 0):start_x+w]
+                new_ent_map = (- new_probs * torch.log(new_probs + 1e-8)).sum(dim=0)
 
+
+                new_sem_seg[:, max(start_y, 0):start_y+h, max(start_x, 0):start_x+w] = \
+                        torch.where(new_ent_map < cur_ent_map, new_logits, cur_logits)
+
+                cur_ent_map[:] = torch.where(cur_ent_map < new_ent_map, cur_ent_map, new_ent_map)
 
             else:
                 raise ValueError(f'no such mosaic type {mosaic_type}')
@@ -514,7 +518,7 @@ def mosaic_instance_data(instance_list, offsets, mask_shape=None, pad_shape=None
     if 'sem_seg' in instance_list[0]:
         if mosaic_type == 'gaussian_sum':
             merged_instance.sem_seg = (new_sem_seg / (cnt_sem_seg + 1e-8))[None]
-        elif mosaic_type == 'max_prob':
+        elif mosaic_type == 'min_entropy':
             merged_instance.sem_seg = new_sem_seg[None]
         else:
             raise ValueError(f'no such mosaic type {mosaic_type}')

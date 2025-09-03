@@ -1,6 +1,7 @@
 # dataset settings
 dataset_type = 'PlanetBasemapNoAnnDataset'
-data_root = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/global_quarterly_2023q2_mosaic/'
+data_root = '/home/fahong/Datasets/ai4eo3/Global3D_v2/train_data/height_230k'
+
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True
 )
@@ -34,7 +35,7 @@ test_pipeline = [
     dict(type='LoadImageFromFile', backend_args=backend_args),
     dict(type='LoadAnnotations', with_bbox=True, with_mask=True, poly2mask=False, with_poly_json=False),
     dict(type='LoadTIFMetaInfo'),
-    # dict(type='Resize', scale=(1024, 1024), keep_ratio=True),
+    # dict(type='Resize', scale=(160, 160), keep_ratio=True),
     dict(
         type='PackDetInputs',
         meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape',
@@ -54,7 +55,8 @@ test_dataloader = dict(
         pipeline=test_pipeline,
         backend_args=backend_args,
         img_suffix='',
-        ann_file=f'{data_root}/filelist/filtered_world_cover_Oceania.txt',
+        ann_file=f'{data_root}/all.txt',
+        # ann_file = 'coco/coco_no_ann.json',
         # data_prefix=dict(img_path='img'),
     )
 )

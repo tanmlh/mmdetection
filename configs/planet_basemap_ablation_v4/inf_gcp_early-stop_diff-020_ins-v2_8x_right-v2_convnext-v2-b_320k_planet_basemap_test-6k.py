@@ -5,7 +5,7 @@ _base_ = [
 
 custom_imports = dict(
     imports=['mmpretrain.models'], allow_failed_imports=False)
-load_from = 'work_dirs/gcp_8x_right-50_late-stop_seg-based-det_convnext-v2-b_160k_planet_basemap_global/iter_160000.pth'
+load_from = 'work_dirs/gcp_ins-v2_8x_right-ang-v2_seg-based-det_convnext-v2-b_320k_planet_basemap_global/iter_320000.pth'
 
 model = dict(
     type='SegBasedDetector',
@@ -67,22 +67,17 @@ model = dict(
             type='ClusterSeg2InsHead',
             poly_cfg=dict(
                 sem_seg_thr=0.4,
-                diff_thr=0.05,
-                # diff_thr=1e9,
-                cluster_mode='late_stop'
+                diff_thr=0.20
             )
         ),
         poly_head=dict(
             type='GCPPolyHead',
             feat_channels=256,
-            in_feat_channels=7 * 7 * 2,
+            in_feat_channels=7 * 7 * 5,
             poly_cfg=dict(
                 unfold_cfg=dict(
                     kernel_size=7, stride=1
                 ),
-                # mask_feat_type='img_prob',
-                disable_mask_feat=False,
-                mask_feat_type='prob',
                 align_pred_gt=True,
                 sample_iou_thr=0.3,
                 num_max_sample=200,
@@ -131,7 +126,7 @@ model = dict(
             loss_poly_right_ang = dict(
                 type='SmoothL1Loss',
                 reduction='mean',
-                loss_weight=10.
+                loss_weight=20.
             )
         )
     ),
@@ -163,79 +158,19 @@ model = dict(
                 nms_type='polygon',
                 iou_thr=0.8
             ),
-            out_cfg=dict(
-                save_results=False,
-                out_dir='./work_dirs/basemap_pred_results/st-mark-rcnn-v2_convnext-v2-b',
-                out_poly_scale=1/4.,
-            )
         )
     ))
 
-val_evaluator = [
-    dict(
-        type='PlanetMetric',
-        # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_sample_europe2/coco_ann/upscale-global_quartely_2023q2.json',
-        # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_full/upscale_test_global_quartely_2023q2.json',
-        # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_full/upscale_merged_filtered_test_dp_global_quartely_2023q2.json',
-        ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_global/upscale_test_continent_global_quartely_2023q2.json',
-        # ann_file = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2/coco_ann_full/upscale_merged_test_continent_global_quartely_2023q2.json'
-        # metric=['bbox'],
-        # metric=['map_fast', 'proposal_fast', 'bbox_fast'],
-        # metric=['poly_ap_fast', 'map_fast', 'bbox_fast'],
-        metric=['poly_ap_fast'],
-        # split_meta_key='continent',
-        backend_args={{_base_.backend_args}},
-        out_cfg=dict(
-            save_results=False,
-            out_dir='./work_dirs/basemap_pred_results/st-mark-rcnn-v2_convnext-v2-b',
-            out_size=(256, 256)
-        ),
-        min_bbox_size=0,
-        iou_thrs=[0.3, 0.35, 0.4, 0.45, 0.5],
-        proposal_nums=[128, 256, 512, 1024, 2048]
-    )
+test_evaluator = [
 ]
-test_evaluator = val_evaluator
-
-# optimizer
-embed_multi = dict(lr_mult=1.0, decay_mult=0.0)
-optim_wrapper = dict(
-    type='OptimWrapper',
-    optimizer=dict(
-        type='AdamW',
-        lr=0.0001,
-        weight_decay=0.05,
-        eps=1e-8,
-        betas=(0.9, 0.999)),
-    paramwise_cfg=dict(
-        custom_keys={
-            'backbone': dict(lr_mult=0.1, decay_mult=1.0),
-            'query_embed': embed_multi,
-            'query_feat': embed_multi,
-            'level_embed': embed_multi,
-        },
-        norm_decay_mult=0.0),
-    clip_grad=dict(max_norm=0.01, norm_type=2))
-
-max_iters=160000
-param_scheduler = [
-    # dict(
-    #     type='LinearLR', start_factor=0.001, by_epoch=False, begin=0,
-    #     end=1000),
-    dict(
-        type='MultiStepLR',
-        begin=0,
-        end=160000,
-        by_epoch=False,
-        milestones=[120000],
-        gamma=0.1)
-]
-
-# train_cfg = dict(type='EpochBasedTrainLoop', max_epochs=max_epochs, val_interval=1)
-train_cfg = dict(type='IterBasedTrainLoop', max_iters=160000, val_interval=16000)
-val_cfg = dict(type='ValLoop')
 test_cfg = dict(type='TestLoop')
 log_processor = dict(type='LogProcessor', window_size=50, by_epoch=False)
+
+save_cfg=dict(
+    save_results=True,
+    out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/gcp_early-stop_diff020',
+    out_poly_scale=1/8.,
+)
 
 default_hooks = dict(
     checkpoint=dict(
@@ -243,20 +178,12 @@ default_hooks = dict(
         by_epoch=False,
         save_last=True,
         max_keep_ckpts=10,
-        interval=16000),
-    # ema=dict(
-    #     type='EMAHook', momentum=0.01, interval=1
-    # ),
+        interval=8000),
+    ema=dict(
+        type='EMAHook', momentum=0.01, interval=1
+    ),
     # visualizer=dict(type='WandbVisualizer', wandb_cfg=wandb_cfg, name='wandb_vis')
-    # visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5, score_thr=0.1)
-)
-
-save_cfg=dict(
-    save_results=True,
-    out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/gcp',
-    # out_dir = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/gcp_ct',
-    out_poly_scale=1/8.,
-    prob_tif_pattern = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/dataset_2023q2_v3/test_6k/google25d/tif_v3/{}.tif'
+    visualization=dict(type='TanmlhVisualizationHook', draw=True, interval=5, score_thr=0.1)
 )
 
 vis_backends = [
@@ -265,7 +192,7 @@ vis_backends = [
         init_kwargs=dict(
             project = 'planet_basemap',
             entity = 'tum-tanmlh',
-            name = 'gcp_8x_late-stop_seg-based-det_convnext-v2-b_160k_planet_basemap_global',
+            name = 'gcp_ins-v2_8x_right-v2_seg-based-det_convnext-v2-b_320k_planet_basemap_global',
             resume = 'never',
             dir = './work_dirs/',
             allow_val_change=True
@@ -279,8 +206,8 @@ visualizer = dict(
 # find_unused_parameters=True
 
 
-# Default setting for scaling LR automatically
-#   - `enable` means enable scaling LR automatically
-#       or not by default.
-#   - `base_batch_size` = (8 GPUs) x (2 samples per GPU).
-auto_scale_lr = dict(enable=True, base_batch_size=2)
+test_dataloader = dict(
+    num_workers=1,
+    dataset=dict(
+    )
+)

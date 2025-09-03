@@ -1,6 +1,6 @@
 # dataset settings
 dataset_type = 'PlanetBasemapNoAnnDataset'
-data_root = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/global_quarterly_2023q2_mosaic/'
+data_root = '/home/fahong/Datasets/ai4eo3/planet_data_download/basemap/global_quartely_2023q2'
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True
 )
@@ -54,7 +54,7 @@ test_dataloader = dict(
         pipeline=test_pipeline,
         backend_args=backend_args,
         img_suffix='',
-        ann_file=f'{data_root}/filelist/filtered_world_cover_Oceania.txt',
+        ann_file=f'{data_root}/filtered_filelist/filtered_world_cover_Globe.txt',
         # data_prefix=dict(img_path='img'),
     )
 )
